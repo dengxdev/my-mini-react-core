@@ -15,7 +15,7 @@ import {
  * @param {*} children 新子节点的 vnode 数组
  */
 export function reconcileChildren(returnFiber, children) {
-	// 文本节点已经在 updateNode 处理过了
+	// 不为文本节点创建子 fiber
 	if (isStrOrNum(children)) return;
 	// 规范化为 vnode 数组
 	const normalizedChildren = isArray(children) ? children : [children];

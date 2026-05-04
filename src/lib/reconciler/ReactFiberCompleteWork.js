@@ -13,7 +13,6 @@ import { updateNode } from "../shared/utils";
  */
 function completeWork(wip) {
 	const tag = wip.tag;
-
 	switch (tag) {
 		case HostComponent: {
 			completeHostComponent(wip);

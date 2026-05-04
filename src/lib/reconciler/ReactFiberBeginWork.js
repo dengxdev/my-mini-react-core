@@ -2,13 +2,11 @@
 import {
   FunctionComponent,
   ClassComponent,
-  HostText,
   HostComponent,
   Fragment,
 } from "./ReactWorkTags";
 import {
   updateHostComponent,
-  updateHostTextComponent,
   updateFunctionComponent,
   updateClassComponent,
 } from "./ReactFiberReconciler";
@@ -30,10 +28,6 @@ function beginWork(wip) {
     }
     case ClassComponent: {
       updateClassComponent(wip);
-      break;
-    }
-    case HostText: {
-      updateHostTextComponent(wip);
       break;
     }
     case Fragment: {
