@@ -27,8 +27,8 @@ function areHookInputsEqual(nextDeps, prevDeps) {
 
 // 首先我们先定义一些全部变量
 let currentlyRenderingFiber = null; // 当前渲染的 fiber 对象
-let workInProgressHook = null; // 当前正在处理的 hook
-let currentHook = null; // 当前处理完的 hook
+let lastProcessedHook = null; // 上一个已处理的新 hook
+let lastOldHook = null; // 上次处理的旧 hook
 let EFFECT_HOOK_INDEX = 0; // 当前 effect hook 的索引
 let HOOK_INDEX = 0; // 当前 hook 调用索引，用于检查 hook 调用顺序
 
@@ -44,8 +44,10 @@ export function renderWithHooks(wip) {
 	currentlyRenderingFiber = wip;
 	// 将当前渲染的 fiber 对象的 memorizedState 置为 null
 	currentlyRenderingFiber.memorizedState = null;
-	// 将当前正在处理的 hook 置为 null
-	workInProgressHook = null;
+	// 将上次处理的新 hook 置为 null
+	lastProcessedHook = null;
+	// 将上次处理的旧 hook 置为 null
+	lastOldHook = null;
 	//存储 effect 对应的副作用函数和依赖项
 	currentlyRenderingFiber.updateQueue = [];
 	// 重置 effect hook 索引
@@ -55,11 +57,11 @@ export function renderWithHooks(wip) {
 }
 
 /**
- * 获取或创建当前正在处理的 hook 对象
- * 并维护 workInProgressHook 指向链表的最后一个 hook
+ * 获取或创建本次渲染（work-in-progress）中当前位置应该使用的 hook
+ * 并维护 lastProcessedHook 指向新 hook 链表中的下一个 hook
  * @returns {Object} hook 对象
  * @throws {Error} 如果在非函数组件中调用 hooks
- * @throws {Error} 如果 hook 调用顺序不一致
+ * @throws {Error} 如果本次渲染调用的 hook 数量超过了上次
  */
 function updateWorkInProgressHook() {
 	// Hook 规则检查 1: 确保在函数组件内部调用
@@ -70,24 +72,24 @@ function updateWorkInProgressHook() {
 	}
 
 	// 这个变量就是存储最终我们要向外部返回的 hook
-	let hook = null;
-
-	const current = currentlyRenderingFiber.alternate; // 旧的 fiber 对象
+	let targetHook = null;
+	// 旧 fiber
+	const current = currentlyRenderingFiber.alternate; 
 	if (current) {
-		// 进入此分支，说明不是第一次渲染，存在旧的 fiber 对象
+		// 存在旧 fiber，更新阶段，尝试复用旧 fiber 上的 hook 链表
 		currentlyRenderingFiber.memorizedState = current.memorizedState;
-		if (workInProgressHook) {
-			// 链表已经存在
-			workInProgressHook = hook = workInProgressHook.next;
-			currentHook = currentHook.next;
+		if (lastProcessedHook) {
+			// 第 N 次调用（N > 1），沿链表往后走
+			lastProcessedHook = targetHook = lastProcessedHook.next;
+			lastOldHook = lastOldHook.next;
 		} else {
-			// 链表不存在
-			workInProgressHook = hook = currentlyRenderingFiber.memorizedState;
-			currentHook = current.memorizedState;
+			// 第一次调用，取链表头
+			lastProcessedHook = targetHook = currentlyRenderingFiber.memorizedState;
+			lastOldHook = current.memorizedState;
 		}
 
-		// Hook 规则检查 2: 确保 hook 调用顺序一致
-		if (!hook) {
+		// Hook 规则检查 2: 本次渲染调用的 hook 数量是否超过了上次
+		if (!targetHook) {
 			throw new Error(
 				"Rendered more hooks than during the previous render."
 			);
@@ -95,23 +97,23 @@ function updateWorkInProgressHook() {
 	} else {
 		// 说明是第一次渲染
 		// 第一次你进来，你啥都没有，那么我们就需要做一些初始化的工作
-		hook = {
+		targetHook = {
 			memorizedState: null, // 存储数据
 			next: null, // 指向下一个 hook
 		};
-		if (workInProgressHook) {
+		if (lastProcessedHook) {
 			// 说明这个链表上面已经有 hook 了
-			workInProgressHook = workInProgressHook.next = hook;
+			lastProcessedHook = lastProcessedHook.next = targetHook;
 		} else {
 			// 说明 hook 链表上面还没有 hook
-			workInProgressHook = currentlyRenderingFiber.memorizedState = hook;
+			lastProcessedHook = currentlyRenderingFiber.memorizedState = targetHook;
 		}
 	}
 
 	// 增加 hook 索引
 	HOOK_INDEX++;
 
-	return hook;
+	return targetHook;
 }
 
 /**
