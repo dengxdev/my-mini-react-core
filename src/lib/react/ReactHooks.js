@@ -3,6 +3,12 @@
  */
 import scheduleUpdateOnFiber from "../reconciler/ReactFiberWorkLoop";
 import { Passive, Layout } from "../shared/utils";
+import {
+	getIsBatchingUpdates,
+	setIsBatchingUpdates,
+	enqueueUpdate,
+	flushUpdates,
+} from "../shared/batch";
 
 /**
  * 比较两个依赖数组是否相等
@@ -29,12 +35,6 @@ function areHookInputsEqual(nextDeps, prevDeps) {
 let currentlyRenderingFiber = null; // 当前渲染的 fiber 对象
 let lastProcessedHook = null; // 上一个已处理的新 hook
 let lastOldHook = null; // 上次处理的旧 hook
-let EFFECT_HOOK_INDEX = 0; // 当前 effect hook 的索引
-let HOOK_INDEX = 0; // 当前 hook 调用索引，用于检查 hook 调用顺序
-
-// 批处理相关变量
-let isBatchingUpdates = false; // 是否正在批处理更新
-let updateQueue = []; // 批处理更新队列
 
 /**
  * 重置 Hooks 链表
@@ -50,10 +50,6 @@ export function renderWithHooks(wip) {
 	lastOldHook = null;
 	//存储 effect 对应的副作用函数和依赖项
 	currentlyRenderingFiber.updateQueue = [];
-	// 重置 effect hook 索引
-	EFFECT_HOOK_INDEX = 0;
-	// 重置 hook 调用索引
-	HOOK_INDEX = 0;
 }
 
 /**
@@ -88,7 +84,7 @@ function updateWorkInProgressHook() {
 			lastOldHook = current.memorizedState;
 		}
 
-		// Hook 规则检查 2: 本次渲染调用的 hook 数量是否超过了上次
+		// Hook 规则检查 2: 检查本次渲染的 hook 数量是否超过上次（检测到条件分支中新增 hook 调用）
 		if (!targetHook) {
 			throw new Error(
 				"Rendered more hooks than during the previous render."
@@ -109,10 +105,6 @@ function updateWorkInProgressHook() {
 			lastProcessedHook = currentlyRenderingFiber.memorizedState = targetHook;
 		}
 	}
-
-	// 增加 hook 索引
-	HOOK_INDEX++;
-
 	return targetHook;
 }
 
@@ -143,12 +135,15 @@ function dispatchReducerAction(fiber, hook, reducer, action) {
 	fiber.alternate = { ...fiber };
 	fiber.sibling = null;
 
+	// 同步更新 queue 中的记录（如果存在）
+	if (hook.queue) {
+		hook.queue.lastRenderedState = newValue;
+	}
+
 	// 检查是否需要批处理
-	if (isBatchingUpdates) {
+	if (getIsBatchingUpdates()) {
 		// 将更新操作加入队列
-		updateQueue.push(() => {
-			scheduleUpdateOnFiber(fiber);
-		});
+		enqueueUpdate(() => scheduleUpdateOnFiber(fiber));
 	} else {
 		// 立即执行更新
 		scheduleUpdateOnFiber(fiber);
@@ -162,21 +157,19 @@ function dispatchReducerAction(fiber, hook, reducer, action) {
  */
 export function flushSync(fn) {
 	// 临时禁用批处理
-	const prevIsBatchingUpdates = isBatchingUpdates;
-	isBatchingUpdates = false;
+	const prevIsBatchingUpdates = getIsBatchingUpdates();
+	setIsBatchingUpdates(false);
 
 	try {
 		// 执行传入的函数
 		return fn();
 	} finally {
 		// 恢复批处理状态
-		isBatchingUpdates = prevIsBatchingUpdates;
+		setIsBatchingUpdates(prevIsBatchingUpdates);
 
 		// 如果不在批处理中，执行队列中的更新
-		if (!isBatchingUpdates && updateQueue.length > 0) {
-			const queue = updateQueue;
-			updateQueue = [];
-			queue.forEach(update => update());
+		if (!getIsBatchingUpdates()) {
+			flushUpdates();
 		}
 	}
 }
@@ -188,21 +181,19 @@ export function flushSync(fn) {
  */
 export function batchedUpdates(fn) {
 	// 临时启用批处理
-	const prevIsBatchingUpdates = isBatchingUpdates;
-	isBatchingUpdates = true;
+	const prevIsBatchingUpdates = getIsBatchingUpdates();
+	setIsBatchingUpdates(true);
 
 	try {
 		// 执行传入的函数
 		return fn();
 	} finally {
 		// 恢复批处理状态
-		isBatchingUpdates = prevIsBatchingUpdates;
+		setIsBatchingUpdates(prevIsBatchingUpdates);
 
 		// 如果不在批处理中，执行队列中的更新
-		if (!isBatchingUpdates && updateQueue.length > 0) {
-			const queue = updateQueue;
-			updateQueue = [];
-			queue.forEach(update => update());
+		if (!getIsBatchingUpdates()) {
+			flushUpdates();
 		}
 	}
 }
@@ -230,6 +221,19 @@ export function useReducer(reducer, initialState) {
 	if (!currentlyRenderingFiber.alternate) {
 		// 说明是首次渲染
 		hook.memorizedState = initialState; // 将当前 hook 的 memorizedState 置为 initialState
+		// 附加 queue 标记，用于 update 阶段区分 state hook 和 effect hook
+		hook.queue = {
+			lastRenderedState: initialState,
+		};
+	} else {
+		// 更新阶段：数据结构自检
+		// effect/memo/callback 等 hook 节点没有 queue
+		if (hook.queue === undefined || hook.queue === null) {
+			throw new Error(
+				"Hook structure mismatch: expected a state/reducer hook but got a different type. " +
+				"This usually happens when hooks are called in a different order between renders."
+			);
+		}
 	}
 
 	const dispatch = dispatchReducerAction.bind(
@@ -289,7 +293,23 @@ export function useEffect(create, deps) {
 
 	if (currentlyRenderingFiber.alternate) {
 		const prevEffect = hook.memorizedState;
-		if (prevEffect) {
+
+		// 结构自检：如果 memorizedState 不是 effect 对象，说明 hook 类型被交换了
+		// effect 对象的特征是：有 tag 属性，create 是函数
+		const isValidEffect =
+			prevEffect !== null &&
+			typeof prevEffect === "object" &&
+			prevEffect.tag !== undefined &&
+			typeof prevEffect.create === "function";
+
+		if (prevEffect !== null && !isValidEffect) {
+			throw new Error(
+				"Hook structure mismatch: expected an effect hook but got a different type. " +
+				"This usually happens when hooks are called in a different order between renders."
+			);
+		}
+
+		if (isValidEffect) {
 			const prevDeps = prevEffect.deps;
 			if (nextDeps !== null) {
 				const depsEqual = nextDeps.every((dep, i) => Object.is(dep, prevDeps[i]));
@@ -315,7 +335,22 @@ export function useLayoutEffect(create, deps) {
 
 	if (currentlyRenderingFiber.alternate) {
 		const prevEffect = hook.memorizedState;
-		if (prevEffect) {
+
+		// 结构自检：如果 memorizedState 不是 effect 对象，说明 hook 类型被交换了
+		const isValidEffect =
+			prevEffect !== null &&
+			typeof prevEffect === "object" &&
+			prevEffect.tag !== undefined &&
+			typeof prevEffect.create === "function";
+
+		if (prevEffect !== null && !isValidEffect) {
+			throw new Error(
+				"Hook structure mismatch: expected a layout effect hook but got a different type. " +
+				"This usually happens when hooks are called in a different order between renders."
+			);
+		}
+
+		if (isValidEffect) {
 			const prevDeps = prevEffect.deps;
 			if (nextDeps !== null) {
 				const depsEqual = nextDeps.every((dep, i) => Object.is(dep, prevDeps[i]));

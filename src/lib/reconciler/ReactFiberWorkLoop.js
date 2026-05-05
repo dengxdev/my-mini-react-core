@@ -11,9 +11,26 @@ let wip = null;
 // 从命名可以看出，这是保存当前根节点的 fiber 对象
 let wipRoot = null;
 
+// 标记是否正在渲染中，防止渲染阶段调用 setState 破坏 wip
+let isRendering = false;
+// 存储渲染阶段产生的更新，等当前渲染完成后再触发
+let renderPhaseUpdates = [];
+
 function scheduleUpdateOnFiber(fiber) {
-  wip = fiber;
-  wipRoot = fiber;
+  // 渲染阶段调用 setState，暂存更新，等当前渲染完成后再触发
+  if (isRendering) {
+    renderPhaseUpdates.push(fiber);
+    return;
+  }
+
+  // 向上找到根 fiber，确保始终从根开始渲染
+  let node = fiber;
+  while (node.return) {
+    node = node.return;
+  }
+
+  wip = node;
+  wipRoot = node;
 
   // 目前先使用 requestIdleCallback 来进行调用
   // 后期使用 scheduler 包来进行调用
@@ -46,19 +63,34 @@ function scheduleUpdateOnFiber(fiber) {
  * 不再接收时间参数，内部通过 shouldYieldToHost() 检查是否应该让出主线程
  */
 function workloop() {
-  while (wip) {
-    // 检查是否应该让出主线程（超过 5ms）
-    if (shouldYieldToHost()) {
-      // 时间用完，返回函数让调度器知道还有工作要做
-      return workloop;
+  isRendering = true;
+  try {
+    while (wip) {
+      // 检查是否应该让出主线程（超过 5ms）
+      if (shouldYieldToHost()) {
+        // 时间用完，返回函数让调度器知道还有工作要做
+        return workloop;
+      }
+      performUnitOfWork(); // 该方法负责处理一个 fiber 节点
     }
-    performUnitOfWork(); // 该方法负责处理一个 fiber 节点
+    if (!wip && wipRoot) {
+      commitRoot();
+    }
+    // 返回 undefined 表示所有工作完成
+    return undefined;
+  } finally {
+    isRendering = false;
+
+    // 处理渲染阶段产生的更新
+    if (renderPhaseUpdates.length > 0) {
+      const updates = renderPhaseUpdates;
+      renderPhaseUpdates = [];
+      // 取第一个更新触发重新渲染（简化处理）
+      if (updates.length > 0) {
+        scheduleUpdateOnFiber(updates[0]);
+      }
+    }
   }
-  if (!wip && wipRoot) {
-    commitRoot();
-  }
-  // 返回 undefined 表示所有工作完成
-  return undefined;
 }
 
 /**
