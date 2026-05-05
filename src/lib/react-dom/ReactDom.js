@@ -1,5 +1,12 @@
 import createFiber from "../reconciler/ReactFiber";
 import scheduleUpdateOnFiber from "../reconciler/ReactFiberWorkLoop";
+import React from "../react/React.js";
+
+React.Component._updater = {
+  enqueueSetState(fiber) {
+    scheduleUpdateOnFiber(fiber);
+  },
+};
 
 /**
  * 更新容器的方法

@@ -1,5 +1,11 @@
 import { Placement, Update, updateNode, Passive, Layout } from "../shared/utils";
-
+import {
+	FunctionComponent,
+	ClassComponent,
+	HostComponent,
+	HostText,
+	Fragment,
+} from "./ReactWorkTags";
 let rootWithPendingPassiveEffects = null;
 // pendingPassiveEffectsRenderPriority 用于存储待处理的被动效果的渲染优先级
 // 目前该变量尚未被使用，但保留以备后续扩展使用
@@ -153,14 +159,49 @@ function COMMIT_HOOK_EFFECT_LIST_MOUNT_CREATE(tag, finishedWork) {
 }
 
 /**
+ * 递归调用 fiber 树中所有类组件的 componentWillUnmount
+ * @param {Object} fiber 被删除的 fiber 节点
+ */
+function commitDeletion(fiber) {
+	let child = fiber.child;
+	while (child) {
+		commitDeletion(child);
+		child = child.sibling;
+	}
+	if (fiber.tag === ClassComponent) {
+		const instance = fiber.stateNode;
+		if (instance && instance.componentWillUnmount) {
+			instance.componentWillUnmount();
+		}
+	}
+}
+
+/**
  * 提交生命周期副作用
  * @param {Object} finishedWork 完成的 fiber 节点
  */
 function commitLifeCycles(finishedWork) {
 	switch (finishedWork.tag) {
-		case 0:
-		case 1: {
-			commitHookEffectListMount(Layout, finishedWork);
+		case FunctionComponent: {
+			if (finishedWork.updateQueue && finishedWork.updateQueue.lastEffect) {
+				commitHookEffectListMount(Layout, finishedWork);
+			}
+			break;
+		}
+		case ClassComponent: {
+			const instance = finishedWork.stateNode;
+			if (!instance) return;
+			if (finishedWork.alternate) {
+				// update 阶段
+				if (instance.componentDidUpdate) {
+					instance.componentDidUpdate();
+				}
+			} else {
+				// mount 阶段
+				if (instance.componentDidMount) {
+					instance.componentDidMount();
+				}
+			}
 			break;
 		}
 	}
@@ -226,6 +267,7 @@ function commitWorker(wip) {
 	if (wip.deletions) {
 		const parentDOM = getParentDOM(wip);
 		wip.deletions.forEach(childToDelete => {
+			commitDeletion(childToDelete);
 			const dom = getDeletionDom(childToDelete);
 			if (dom && parentDOM) {
 				parentDOM.removeChild(dom);
@@ -236,8 +278,8 @@ function commitWorker(wip) {
 	commitWorker(wip.child); // 提交子节点
 	commitWorker(wip.sibling); // 提交兄弟节点
 
-	// 处理 Layout 副作用（同步执行）
-	if (wip.updateQueue && wip.updateQueue.lastEffect) {
+	// 处理 Layout 副作用和类组件生命周期（同步执行）
+	if (wip.tag === FunctionComponent || wip.tag === ClassComponent) {
 		commitLifeCycles(wip);
 	}
 

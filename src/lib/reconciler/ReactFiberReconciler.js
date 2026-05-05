@@ -25,15 +25,50 @@ export function updateFunctionComponent(wip) {
 }
 
 /**
+ * 处理类组件的 setState 更新队列
+ * @param {Object} wip 工作中的 fiber 节点
+ * @param {Object} instance 类组件实例
+ */
+function processUpdateQueue(wip, instance) {
+  const updateQueue = wip.updateQueue;
+  if (!updateQueue || updateQueue.length === 0) {
+    return;
+  }
+
+  let newState = { ...instance.state };
+  updateQueue.forEach((update) => {
+    const payload = update.payload;
+    if (typeof payload === "function") {
+      newState = { ...newState, ...payload(newState, instance.props) };
+    } else {
+      newState = { ...newState, ...payload };
+    }
+  });
+
+  instance.state = newState;
+  wip.updateQueue = null;
+}
+
+/**
  * 更新类组件
  * @param {*} wip 需要处理的 fiber 对象节点
  */
 export function updateClassComponent(wip) {
   const { type, props } = wip;
-  const instance = new type(props);
-  // 调用 render 方法，获取到 vnode
+  let instance = wip.stateNode;
+
+  if (!instance) {
+    // mount 阶段：new 实例，关联 fiber
+    instance = new type(props);
+    wip.stateNode = instance;
+    instance._reactInternalFiber = wip;
+  } else {
+    // update 阶段：复用实例，更新 props，处理 setState 队列
+    instance.props = props;
+    processUpdateQueue(wip, instance);
+  }
+
   const children = instance.render();
-  // diff 算法处理子节点
   reconcileChildren(wip, children);
 }
 

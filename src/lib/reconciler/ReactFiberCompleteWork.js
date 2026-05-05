@@ -22,9 +22,13 @@ function completeWork(wip) {
 			completeHostText(wip);
 			break;
 		}
-		case FunctionComponent:
+		case FunctionComponent: {
+			completeFunctionComponent(wip);
+			break;
+		}
 		case ClassComponent: {
-			completeClassOrFunctionComponent(wip);
+			// 类组件的 completeWork 当前无需处理
+			// setState 的 updateQueue 在 beginWork 阶段已消费
 			break;
 		}
 		case Fragment: {
@@ -55,10 +59,10 @@ function completeHostText(wip) {
 }
 
 /**
- * 完成类组件或函数组件的处理，处理副作用队列
+ * 完成函数组件的处理，处理副作用队列
  * @param {Object} wip 工作中的 fiber 节点
  */
-function completeClassOrFunctionComponent(wip) {
+function completeFunctionComponent(wip) {
 	if (!wip.updateQueue || wip.updateQueue.length === 0) {
 		return;
 	}
