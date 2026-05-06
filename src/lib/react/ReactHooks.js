@@ -48,8 +48,8 @@ export function renderWithHooks(wip) {
 	lastProcessedHook = null;
 	// 将上次处理的旧 hook 置为 null
 	lastOldHook = null;
-	//存储 effect 对应的副作用函数和依赖项
-	currentlyRenderingFiber.updateQueue = [];
+	// 存储 effect 对应的副作用函数和依赖项
+	currentlyRenderingFiber.updateQueue = null;
 }
 
 /**
@@ -263,7 +263,10 @@ function pushEffect(tag, create, destroy, deps) {
 		next: null,
 	};
 
-	if (currentlyRenderingFiber.updateQueue === null) {
+	if (
+		currentlyRenderingFiber.updateQueue === null ||
+		currentlyRenderingFiber.updateQueue === undefined
+	) {
 		currentlyRenderingFiber.updateQueue = { lastEffect: null };
 	}
 

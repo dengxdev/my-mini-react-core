@@ -59,71 +59,15 @@ function completeHostText(wip) {
 }
 
 /**
- * 完成函数组件的处理，处理副作用队列
+ * 完成函数组件的处理
  * @param {Object} wip 工作中的 fiber 节点
  */
 function completeFunctionComponent(wip) {
-	if (!wip.updateQueue || wip.updateQueue.length === 0) {
+	// 副作用环形链表已在 render 阶段的 pushEffect 中完整构建
+	// deps 比较也在 hooks 调用阶段完成，此处无需额外处理
+	if (!wip.updateQueue || !wip.updateQueue.lastEffect) {
 		return;
 	}
-
-	const updateQueue = wip.updateQueue;
-	const lastEffect = wip.alternate?.updateQueue?.lastEffect;
-
-	if (lastEffect) {
-		wip.updateQueue.lastEffect = lastEffect;
-	} else {
-		wip.updateQueue.lastEffect = null;
-	}
-
-	updateQueue.forEach((effect) => {
-		const lastEffectRecord = lastEffect?.effectList?.find(
-			(lastEffect) => lastEffect.tag === effect.tag
-		);
-
-		if (lastEffectRecord) {
-			const depsChanged = !areHookInputsEqual(effect.deps, lastEffectRecord.deps);
-			if (depsChanged) {
-				effect.destroy = lastEffectRecord.destroy;
-				effect.create = lastEffectRecord.create;
-				effect.deps = lastEffectRecord.deps;
-			}
-		}
-
-		if (!wip.updateQueue.lastEffect) {
-			wip.updateQueue.lastEffect = effect;
-		} else {
-			effect.next = wip.updateQueue.lastEffect.next;
-			wip.updateQueue.lastEffect.next = effect;
-			wip.updateQueue.lastEffect = effect;
-		}
-	});
-}
-
-/**
- * 比较两个依赖数组是否相等
- * @param {Array} nextDeps 新的依赖数组
- * @param {Array} prevDeps 旧的依赖数组
- * @returns {boolean} 是否相等
- */
-function areHookInputsEqual(nextDeps, prevDeps) {
-	if (prevDeps === null) {
-		return false;
-	}
-
-	if (prevDeps.length !== nextDeps.length) {
-		return false;
-	}
-
-	for (let i = 0; i < prevDeps.length && i < nextDeps.length; i++) {
-		if (Object.is(nextDeps[i], prevDeps[i])) {
-			continue;
-		}
-		return false;
-	}
-
-	return true;
 }
 
 export default completeWork;
-
