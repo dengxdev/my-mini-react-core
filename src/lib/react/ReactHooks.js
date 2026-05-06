@@ -267,14 +267,17 @@ function pushEffect(tag, create, destroy, deps) {
 		currentlyRenderingFiber.updateQueue === null ||
 		currentlyRenderingFiber.updateQueue === undefined
 	) {
+		// mount 阶段，初始化 updateQueue
 		currentlyRenderingFiber.updateQueue = { lastEffect: null };
 	}
 
 	const updateQueue = currentlyRenderingFiber.updateQueue;
 	if (updateQueue.lastEffect === null) {
+		// mount 阶段
 		effect.next = effect;
 		updateQueue.lastEffect = effect;
 	} else {
+		// update 阶段
 		const lastEffect = updateQueue.lastEffect;
 		const firstEffect = lastEffect.next;
 		lastEffect.next = effect;
