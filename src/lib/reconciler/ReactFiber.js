@@ -34,8 +34,10 @@ function createFiber(vnode, returnFiber) {
 		index: null,
 		// 存储旧的 fiber 对象
 		alternate: null,
-		// 根据不同的 hook 类型，存储不同的数据
-		memorizedState: null,
+		// 上一次 commit 后的 props
+		memoizedProps: null,
+		// 上一次 commit 后的 state（类组件存 state，函数组件存 hooks 链表头）
+		memoizedState: null,
 	};
 
 	// 实际上 fiber 对象上面还有一个 tag 值

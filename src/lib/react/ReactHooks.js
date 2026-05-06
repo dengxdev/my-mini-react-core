@@ -42,8 +42,8 @@ let lastOldHook = null; // 上次处理的旧 hook
  */
 export function renderWithHooks(wip) {
 	currentlyRenderingFiber = wip;
-	// 将当前渲染的 fiber 对象的 memorizedState 置为 null
-	currentlyRenderingFiber.memorizedState = null;
+	// 将当前渲染的 fiber 对象的 memoizedState 置为 null
+	currentlyRenderingFiber.memoizedState = null;
 	// 将上次处理的新 hook 置为 null
 	lastProcessedHook = null;
 	// 将上次处理的旧 hook 置为 null
@@ -73,15 +73,15 @@ function updateWorkInProgressHook() {
 	const current = currentlyRenderingFiber.alternate; 
 	if (current) {
 		// 存在旧 fiber，更新阶段，尝试复用旧 fiber 上的 hook 链表
-		currentlyRenderingFiber.memorizedState = current.memorizedState;
+		currentlyRenderingFiber.memoizedState = current.memoizedState;
 		if (lastProcessedHook) {
 			// 第 N 次调用（N > 1），沿链表往后走
 			lastProcessedHook = targetHook = lastProcessedHook.next;
 			lastOldHook = lastOldHook.next;
 		} else {
 			// 第一次调用，取链表头
-			lastProcessedHook = targetHook = currentlyRenderingFiber.memorizedState;
-			lastOldHook = current.memorizedState;
+			lastProcessedHook = targetHook = currentlyRenderingFiber.memoizedState;
+			lastOldHook = current.memoizedState;
 		}
 
 		// Hook 规则检查 2: 检查本次渲染的 hook 数量是否超过上次（检测到条件分支中新增 hook 调用）
@@ -94,7 +94,7 @@ function updateWorkInProgressHook() {
 		// 说明是第一次渲染
 		// 第一次你进来，你啥都没有，那么我们就需要做一些初始化的工作
 		targetHook = {
-			memorizedState: null, // 存储数据
+			memoizedState: null, // 存储数据
 			next: null, // 指向下一个 hook
 		};
 		if (lastProcessedHook) {
@@ -102,7 +102,7 @@ function updateWorkInProgressHook() {
 			lastProcessedHook = lastProcessedHook.next = targetHook;
 		} else {
 			// 说明 hook 链表上面还没有 hook
-			lastProcessedHook = currentlyRenderingFiber.memorizedState = targetHook;
+			lastProcessedHook = currentlyRenderingFiber.memoizedState = targetHook;
 		}
 	}
 	return targetHook;
@@ -118,18 +118,18 @@ function updateWorkInProgressHook() {
 function dispatchReducerAction(fiber, hook, reducer, action) {
 	// 计算最新的状态
 	const newValue = reducer
-		? reducer(hook.memorizedState)
+		? reducer(hook.memoizedState)
 		: typeof action === "function"
-			? action(hook.memorizedState)
+			? action(hook.memoizedState)
 			: action;
 
 	// 如果状态没有变化，直接返回
-	if (Object.is(hook.memorizedState, newValue)) {
+	if (Object.is(hook.memoizedState, newValue)) {
 		return;
 	}
 
 	// 更新状态
-	hook.memorizedState = newValue;
+	hook.memoizedState = newValue;
 
 	// 处理 fiber 对象
 	fiber.alternate = { ...fiber };
@@ -214,13 +214,13 @@ export function useState(initialState) {
 export function useReducer(reducer, initialState) {
 	// 首先我们要拿到最新的 hook
 	// 这里的 hook 其实是一个对象，里面存储了一些数据
-	// hook ---> {memorizedState: xxx, next: xxx}
-	// hook 对象里面有两个属性，一个 memorizedState 用于存储数据，一个 next 用于指向下一个 hook
+	// hook ---> {memoizedState: xxx, next: xxx}
+	// hook 对象里面有两个属性，一个 memoizedState 用于存储数据，一个 next 用于指向下一个 hook
 	const hook = updateWorkInProgressHook();
 
 	if (!currentlyRenderingFiber.alternate) {
 		// 说明是首次渲染
-		hook.memorizedState = initialState; // 将当前 hook 的 memorizedState 置为 initialState
+		hook.memoizedState = initialState; // 将当前 hook 的 memoizedState 置为 initialState
 		// 附加 queue 标记，用于 update 阶段区分 state hook 和 effect hook
 		hook.queue = {
 			lastRenderedState: initialState,
@@ -243,7 +243,7 @@ export function useReducer(reducer, initialState) {
 		reducer,
 	);
 
-	return [hook.memorizedState, dispatch];
+	return [hook.memoizedState, dispatch];
 }
 
 /**
@@ -298,9 +298,9 @@ export function useEffect(create, deps) {
 	const nextDeps = deps === undefined ? null : deps;
 
 	if (currentlyRenderingFiber.alternate) {
-		const prevEffect = hook.memorizedState;
+		const prevEffect = hook.memoizedState;
 
-		// 结构自检：如果 memorizedState 不是 effect 对象，说明 hook 类型被交换了
+		// 结构自检：如果 memoizedState 不是 effect 对象，说明 hook 类型被交换了
 		// effect 对象的特征是：有 tag 属性，create 是函数
 		const isValidEffect =
 			prevEffect !== null &&
@@ -327,7 +327,7 @@ export function useEffect(create, deps) {
 	}
 
 	const effect = pushEffect(Passive, create, undefined, nextDeps);
-	hook.memorizedState = effect;
+	hook.memoizedState = effect;
 }
 
 /**
@@ -340,9 +340,9 @@ export function useLayoutEffect(create, deps) {
 	const nextDeps = deps === undefined ? null : deps;
 
 	if (currentlyRenderingFiber.alternate) {
-		const prevEffect = hook.memorizedState;
+		const prevEffect = hook.memoizedState;
 
-		// 结构自检：如果 memorizedState 不是 effect 对象，说明 hook 类型被交换了
+		// 结构自检：如果 memoizedState 不是 effect 对象，说明 hook 类型被交换了
 		const isValidEffect =
 			prevEffect !== null &&
 			typeof prevEffect === "object" &&
@@ -368,7 +368,7 @@ export function useLayoutEffect(create, deps) {
 	}
 
 	const effect = pushEffect(Layout, create, undefined, nextDeps);
-	hook.memorizedState = effect;
+	hook.memoizedState = effect;
 }
 
 /**
@@ -382,7 +382,7 @@ export function useCallback(callback, deps) {
 	const nextDeps = deps === undefined ? null : deps;
 
 	if (currentlyRenderingFiber.alternate) {
-		const prevState = hook.memorizedState;
+		const prevState = hook.memoizedState;
 		if (prevState && nextDeps) {
 			const depsEqual = areHookInputsEqual(nextDeps, prevState.deps);
 			if (depsEqual) {
@@ -392,7 +392,7 @@ export function useCallback(callback, deps) {
 	}
 
 	const memoizedCallback = callback;
-	hook.memorizedState = {
+	hook.memoizedState = {
 		value: memoizedCallback,
 		deps: nextDeps
 	};
@@ -411,7 +411,7 @@ export function useMemo(create, deps) {
 	const nextDeps = deps === undefined ? null : deps;
 
 	if (currentlyRenderingFiber.alternate) {
-		const prevState = hook.memorizedState;
+		const prevState = hook.memoizedState;
 		if (prevState && nextDeps) {
 			const depsEqual = areHookInputsEqual(nextDeps, prevState.deps);
 			if (depsEqual) {
@@ -421,7 +421,7 @@ export function useMemo(create, deps) {
 	}
 
 	const memoizedValue = create();
-	hook.memorizedState = {
+	hook.memoizedState = {
 		value: memoizedValue,
 		deps: nextDeps
 	};

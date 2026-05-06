@@ -7,6 +7,7 @@ import { renderWithHooks } from "../react/ReactHooks";
  * 注意这个 fiber 节点已经能够确定的是一个 HostComponent
  */
 export function updateHostComponent(wip) {
+  wip.memoizedProps = wip.props;
   reconcileChildren(wip, wip.props.children);
 }
 
@@ -67,6 +68,10 @@ export function updateClassComponent(wip) {
     instance.props = props;
     processUpdateQueue(wip, instance);
   }
+
+  // 记录到 fiber，供下次 update 和生命周期使用
+  wip.memoizedProps = props;
+  wip.memoizedState = instance.state;
 
   const children = instance.render();
   reconcileChildren(wip, children);

@@ -1,4 +1,10 @@
-import { Placement, Update, updateNode, Passive, Layout } from "../shared/utils";
+import {
+	Placement,
+	Update,
+	updateNode,
+	Passive,
+	Layout,
+} from "../shared/utils";
 import {
 	FunctionComponent,
 	ClassComponent,
@@ -64,7 +70,7 @@ function commitNode(wip) {
 
 	if (flags & Update && stateNode) {
 		// 这里就应该是更新属性的操作了
-		updateNode(stateNode, wip.alternate.props, wip.props);
+		updateNode(stateNode, wip.alternate.memoizedProps, wip.props);
 	}
 }
 
@@ -171,7 +177,14 @@ function commitDeletion(fiber) {
 	if (fiber.tag === ClassComponent) {
 		const instance = fiber.stateNode;
 		if (instance && instance.componentWillUnmount) {
-			instance.componentWillUnmount();
+			// 同步最后已提交的 props/state，保证 cWU 访问到的是正确的"临终状态"
+			instance.props = fiber.memoizedProps || instance.props;
+			instance.state = fiber.memoizedState || instance.state;
+			try {
+				instance.componentWillUnmount();
+			} catch (error) {
+				console.error('Error in componentWillUnmount:', error);
+			}
 		}
 	}
 }
@@ -193,13 +206,23 @@ function commitLifeCycles(finishedWork) {
 			if (!instance) return;
 			if (finishedWork.alternate) {
 				// update 阶段
-				if (instance.componentDidUpdate) {
-					instance.componentDidUpdate();
+				if (typeof instance.componentDidUpdate === 'function') {
+					const prevProps = finishedWork.alternate.memoizedProps;
+					const prevState = finishedWork.alternate.memoizedState;
+					try {
+						instance.componentDidUpdate(prevProps, prevState);
+					} catch (error) {
+						console.error('Error in componentDidUpdate:', error);
+					}
 				}
 			} else {
 				// mount 阶段
-				if (instance.componentDidMount) {
-					instance.componentDidMount();
+				if (typeof instance.componentDidMount === 'function') {
+					try {
+						instance.componentDidMount();
+					} catch (error) {
+						console.error('Error in componentDidMount:', error);
+					}
 				}
 			}
 			break;
@@ -255,18 +278,15 @@ function schedulePassiveEffects(finishedWork) {
  */
 function commitWorker(wip) {
 	if (!wip) return;
-
-	// 整个 commitWorker 里面的提交分三步走：
+	// 整个 commitWorker 分三步走:
 	// 1. 提交自己
 	// 2. 提交子节点
 	// 3. 提交兄弟节点
-
 	commitNode(wip); // 提交自己
-
-	// 处理 deletions：删除旧 fiber 对应的 DOM
+	// 处理 deletions: 删除旧 fiber 对应的 DOM
 	if (wip.deletions) {
 		const parentDOM = getParentDOM(wip);
-		wip.deletions.forEach(childToDelete => {
+		wip.deletions.forEach((childToDelete) => {
 			commitDeletion(childToDelete);
 			const dom = getDeletionDom(childToDelete);
 			if (dom && parentDOM) {
@@ -293,4 +313,3 @@ function commitWorker(wip) {
 }
 
 export default commitWorker;
-
