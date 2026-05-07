@@ -36,7 +36,7 @@ function getParentDOM(wip) {
 		temp = temp.return;
 	}
 }
-增加类组件的 stateNode 特殊处理
+
 /**
  * 从被删除的 fiber 树中找到第一个真实 DOM 节点
  * 被删除的可能是函数组件/类组件（无 stateNode），需要递归往下找
