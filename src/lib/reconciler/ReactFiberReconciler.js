@@ -19,6 +19,8 @@ export function updateFunctionComponent(wip) {
   // 重置 Hooks 链表
   renderWithHooks(wip);
   const { type, props } = wip;
+  // 记录到 fiber 上，供下次 update 使用
+  wip.memoizedProps = props; 
   // 执行函数组件，返回 React Element（单个 vnode）
   const children = type(props);
   // 传入 reconcileChildren，内部会统一处理为数组
