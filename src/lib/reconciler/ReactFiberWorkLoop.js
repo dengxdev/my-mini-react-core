@@ -1,7 +1,7 @@
 // 该文件负责整个 React 的一个执行流行
 import beginWork from "./ReactFiberBeginWork";
 import completeWork from "./ReactFiberCompleteWork";
-import commitWorker from "./ReactFiberCommitWork";
+import commitWorker, { flushPendingPassiveEffects } from "./ReactFiberCommitWork";
 import scheduleCallback, { shouldYieldToHost } from "../scheduler/Scheduler";
 
 // wip 的全称为 work in progress，表示正在进行的工作
@@ -132,6 +132,8 @@ function performUnitOfWork() {
  */
 function commitRoot() {
   commitWorker(wipRoot);
+  // 统一异步调度 passive effects（useEffect）
+  flushPendingPassiveEffects();
   // 渲染完成后将 wipRoot 置为 null
   wipRoot = null;
 }

@@ -320,6 +320,7 @@ export function useEffect(create, deps) {
 			if (nextDeps !== null) {
 				const depsEqual = nextDeps.every((dep, i) => Object.is(dep, prevDeps[i]));
 				if (depsEqual) {
+					// 依赖未变，不用推入新的副作用
 					return;
 				}
 			}
@@ -357,12 +358,8 @@ export function useLayoutEffect(create, deps) {
 		}
 
 		if (isValidEffect) {
-			const prevDeps = prevEffect.deps;
-			if (nextDeps !== null) {
-				const depsEqual = nextDeps.every((dep, i) => Object.is(dep, prevDeps[i]));
-				if (depsEqual) {
-					return;
-				}
+			if (areHookInputsEqual(nextDeps, prevEffect.deps)) {
+				return;
 			}
 		}
 	}
@@ -401,7 +398,7 @@ export function useCallback(callback, deps) {
 }
 
 /**
- * 记忆化计算结果，依赖变化时才重新计算
+ * 记忆化计算结果，依赖变化时才重新计算, beginWork 阶段调用计算函数
  * @param {Function} create 计算函数，返回计算结果
  * @param {Array} [deps] 依赖数组，依赖变化时重新计算
  * @returns {*} 记忆化的计算结果

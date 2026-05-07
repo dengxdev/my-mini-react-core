@@ -12,12 +12,9 @@ import {
 	HostText,
 	Fragment,
 } from "./ReactWorkTags";
-let rootWithPendingPassiveEffects = null;
-// pendingPassiveEffectsRenderPriority 用于存储待处理的被动效果的渲染优先级
-// 目前该变量尚未被使用，但保留以备后续扩展使用
-let PENDING_PASSIVE_EFFECTS_RENDER_PRIORITY = null;
-let pendingPassiveEffects = null;
 
+// 收集所有待执行的 passive effect 对应的 fiber 节点
+let pendingPassiveEffects = [];
 /**
  * 获取 fiber 节点的父 DOM 元素
  * @param {Object} wip 工作中的 fiber 节点
@@ -127,51 +124,6 @@ function commitHookEffectListMount(tag, finishedWork) {
 }
 
 /**
- * 卸载并销毁 hook 副作用列表
- * @param {number} tag 副作用类型标签
- * @param {Object} finishedWork 完成的 fiber 节点
- */
-function COMMIT_HOOK_EFFECT_LIST_UNMOUNT_DESTROY(tag, finishedWork) {
-	const updateQueue = finishedWork.updateQueue;
-	const lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
-	if (lastEffect !== null) {
-		const firstEffect = lastEffect.next;
-		let effect = firstEffect;
-		do {
-			if ((effect.tag & tag) === tag) {
-				const destroy = effect.destroy;
-				effect.destroy = undefined;
-				if (destroy !== undefined) {
-					destroy();
-				}
-			}
-			effect = effect.next;
-		} while (effect !== firstEffect);
-	}
-}
-
-/**
- * 挂载并创建 hook 副作用列表
- * @param {number} tag 副作用类型标签
- * @param {Object} finishedWork 完成的 fiber 节点
- */
-function COMMIT_HOOK_EFFECT_LIST_MOUNT_CREATE(tag, finishedWork) {
-	const updateQueue = finishedWork.updateQueue;
-	const lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
-	if (lastEffect !== null) {
-		const firstEffect = lastEffect.next;
-		let effect = firstEffect;
-		do {
-			if ((effect.tag & tag) === tag) {
-				const create = effect.create;
-				effect.destroy = create();
-			}
-			effect = effect.next;
-		} while (effect !== firstEffect);
-	}
-}
-
-/**
  * 递归调用 fiber 树中所有类组件的 componentWillUnmount
  * @param {Object} fiber 被删除的 fiber 节点
  */
@@ -251,29 +203,22 @@ function commitPassiveHookEffects(finishedWork) {
  * 执行待处理的被动副作用
  */
 function flushPassiveEffects() {
-	if (rootWithPendingPassiveEffects !== null) {
-		const ROOT = rootWithPendingPassiveEffects;
-		// 使用 root 变量来确保代码一致性，虽然当前只是读取值，但使用局部变量是良好的实践
-		// 后续如果需要对 root 进行操作，可以直接使用此变量
-		rootWithPendingPassiveEffects = null;
-		PENDING_PASSIVE_EFFECTS_RENDER_PRIORITY = null;
+	if (pendingPassiveEffects.length === 0) return;
 
-		const effects = pendingPassiveEffects;
-		pendingPassiveEffects = null;
+	const effects = pendingPassiveEffects;
+	pendingPassiveEffects = [];
 
-		commitPassiveHookEffects(effects);
-	}
+	effects.forEach((fiber) => {
+		commitPassiveHookEffects(fiber);
+	});
 }
 
 /**
  * 调度被动副作用的执行
- * @param {Object} finishedWork 完成的 fiber 节点
+ * 等整棵树 commit 完成后统一调用一次
  */
-function schedulePassiveEffects(finishedWork) {
-	rootWithPendingPassiveEffects = finishedWork;
-	pendingPassiveEffects = finishedWork;
-
-	if (rootWithPendingPassiveEffects !== null) {
+export function flushPendingPassiveEffects() {
+	if (pendingPassiveEffects.length > 0) {
 		setTimeout(() => {
 			flushPassiveEffects();
 		}, 0);
@@ -306,16 +251,16 @@ function commitWorker(wip) {
 	commitWorker(wip.child); // 提交子节点
 	commitWorker(wip.sibling); // 提交兄弟节点
 
-	// 处理 Layout 副作用和类组件生命周期（同步执行）
+	// 处理 Layout 副作用和类组件生命周期(同步执行)
 	if (wip.tag === FunctionComponent || wip.tag === ClassComponent) {
 		commitLifeCycles(wip);
 	}
 
-	// 处理 Passive 副作用（异步执行）
+	// 收集 Passive 副作用，等 commitRoot 完成后统一异步执行
 	if (wip.updateQueue && wip.updateQueue.lastEffect) {
 		const hasPassiveEffects = wip.updateQueue.lastEffect.tag === Passive;
 		if (hasPassiveEffects) {
-			schedulePassiveEffects(wip);
+			pendingPassiveEffects.push(wip);
 		}
 	}
 }
