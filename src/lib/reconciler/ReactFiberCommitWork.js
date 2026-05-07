@@ -26,15 +26,17 @@ let pendingPassiveEffects = null;
 function getParentDOM(wip) {
 	let temp = wip;
 	while (temp) {
+		if (temp.tag === ClassComponent) {
+			// 跳过特殊的类组件 因为它有 stateNode 但是不是 DOM 节点，
+			// (类组件 stateNode 保存的实例只是一个包含 render() 方法和 state 的对象)
+			temp = temp.return;
+			continue;
+		}
 		if (temp.stateNode) return temp.stateNode;
-		// 如果没有进入上面的 if，说明当前的 fiber 节点并没有对应的 DOM 对象
-		// 那么就需要继续向上寻找
-		// 那么问题来了，为什么该 fiber 上面没有对应的 DOM 对象呢？
-		// 因为该 fiber 节点可能是一个函数组件或者类组件、Franment
 		temp = temp.return;
 	}
 }
-
+增加类组件的 stateNode 特殊处理
 /**
  * 从被删除的 fiber 树中找到第一个真实 DOM 节点
  * 被删除的可能是函数组件/类组件（无 stateNode），需要递归往下找
@@ -44,6 +46,11 @@ function getParentDOM(wip) {
 function getDeletionDom(fiber) {
 	let node = fiber;
 	while (node) {
+		if (node.tag === ClassComponent) {
+			// 类组件 stateNode 不是 DOM节点
+			node = node.child;
+			continue;
+		}
 		if (node.stateNode) {
 			return node.stateNode;
 		}
@@ -183,7 +190,8 @@ function commitDeletion(fiber) {
 			try {
 				instance.componentWillUnmount();
 			} catch (error) {
-				console.error('Error in componentWillUnmount:', error);
+				// 简化处理，没有引入错误边界
+				console.error("Error in componentWillUnmount:", error);
 			}
 		}
 	}
@@ -206,22 +214,22 @@ function commitLifeCycles(finishedWork) {
 			if (!instance) return;
 			if (finishedWork.alternate) {
 				// update 阶段
-				if (typeof instance.componentDidUpdate === 'function') {
+				if (typeof instance.componentDidUpdate === "function") {
 					const prevProps = finishedWork.alternate.memoizedProps;
 					const prevState = finishedWork.alternate.memoizedState;
 					try {
 						instance.componentDidUpdate(prevProps, prevState);
 					} catch (error) {
-						console.error('Error in componentDidUpdate:', error);
+						console.error("Error in componentDidUpdate:", error);
 					}
 				}
 			} else {
 				// mount 阶段
-				if (typeof instance.componentDidMount === 'function') {
+				if (typeof instance.componentDidMount === "function") {
 					try {
 						instance.componentDidMount();
 					} catch (error) {
-						console.error('Error in componentDidMount:', error);
+						console.error("Error in componentDidMount:", error);
 					}
 				}
 			}
