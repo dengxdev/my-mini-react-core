@@ -5,10 +5,10 @@ import commitWorker, { flushPendingPassiveEffects } from "./ReactFiberCommitWork
 import scheduleCallback, { shouldYieldToHost } from "../scheduler/Scheduler";
 
 // wip 的全称为 work in progress，表示正在进行的工作
-// 用这个变量来保存当前正在进行的工作 fiber 对象
+// 当前正在进行的工作 fiber 对象
 let wip = null;
 
-// 从命名可以看出，这是保存当前根节点的 fiber 对象
+// 当前根节点的 fiber 对象
 let wipRoot = null;
 
 // 标记是否正在渲染中，防止渲染阶段调用 setState 破坏 wip
@@ -32,7 +32,7 @@ function scheduleUpdateOnFiber(fiber) {
   wip = node;
   wipRoot = node;
 
-  // 目前先使用 requestIdleCallback 来进行调用
+  // 先使用 requestIdleCallback 来进行调用
   // 后期使用 scheduler 包来进行调用
   // 当浏览器的每一帧有空闲时间的时候，就会执行 workloop 函数
   // requestIdleCallback(workloop);
@@ -48,12 +48,10 @@ function scheduleUpdateOnFiber(fiber) {
 //     // 并且目前也有时间来处理
 //     performUnitOfWork(); // 该方法负责处理一个 fiber 节点
 //   }
-
-//   // 代码来这里，说明要么是没时间，这个我们不需要管
-//   // 还有一种情况，就是整个 fiber 树都处理完了
+//   // 代码来这里，说明要么是没时间，要么就是整个 fiber 树都处理完了
 //   if (!wip) {
-//     // 说明整个 fiber 树都处理完了
-//     // 我们需要将 wipRoot 提交到 DOM 节点上
+//     // 整个 fiber 树都处理完了
+//     // 将 wipRoot 提交到 DOM 节点上
 //     commitRoot();
 //   }
 // }
@@ -80,7 +78,6 @@ function workloop() {
     return undefined;
   } finally {
     isRendering = false;
-
     // 处理渲染阶段产生的更新
     if (renderPhaseUpdates.length > 0) {
       const updates = renderPhaseUpdates;
