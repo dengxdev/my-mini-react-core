@@ -20,36 +20,11 @@ export function updateFunctionComponent(wip) {
   renderWithHooks(wip);
   const { type, props } = wip;
   // 记录到 fiber 上，供下次 update 使用
-  wip.memoizedProps = props; 
+  wip.memoizedProps = props;
   // 执行函数组件，返回 React Element（单个 vnode）
   const children = type(props);
   // 传入 reconcileChildren，内部会统一处理为数组
   reconcileChildren(wip, children);
-}
-
-/**
- * 处理类组件的 setState 更新队列
- * @param {Object} wip 工作中的 fiber 节点
- * @param {Object} instance 类组件实例
- */
-function processUpdateQueue(wip, instance) {
-  const updateQueue = wip.updateQueue;
-  if (!updateQueue || updateQueue.length === 0) {
-    return;
-  }
-
-  let newState = { ...instance.state };
-  updateQueue.forEach((update) => {
-    const payload = update.payload;
-    if (typeof payload === "function") {
-      newState = { ...newState, ...payload(newState, instance.props) };
-    } else {
-      newState = { ...newState, ...payload };
-    }
-  });
-
-  instance.state = newState;
-  wip.updateQueue = null;
 }
 
 /**
@@ -79,3 +54,27 @@ export function updateClassComponent(wip) {
   reconcileChildren(wip, children);
 }
 
+/**
+ * 处理类组件的 setState 更新队列
+ * @param {Object} wip 工作中的 fiber 节点
+ * @param {Object} instance 类组件实例
+ */
+function processUpdateQueue(wip, instance) {
+  const updateQueue = wip.updateQueue;
+  if (!updateQueue || updateQueue.length === 0) {
+    return;
+  }
+
+  let newState = { ...instance.state };
+  updateQueue.forEach((update) => {
+    const payload = update.payload;
+    if (typeof payload === "function") {
+      newState = { ...newState, ...payload(newState, instance.props) };
+    } else {
+      newState = { ...newState, ...payload };
+    }
+  });
+
+  instance.state = newState;
+  wip.updateQueue = null;
+}

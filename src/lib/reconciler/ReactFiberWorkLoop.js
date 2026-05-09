@@ -1,4 +1,4 @@
-// 该文件负责整个 React 的一个执行流行
+// 该文件负责整个 React 的一个执行流
 import beginWork from "./ReactFiberBeginWork";
 import completeWork from "./ReactFiberCompleteWork";
 import commitWorker, { flushPendingPassiveEffects } from "./ReactFiberCommitWork";
@@ -39,22 +39,9 @@ function scheduleUpdateOnFiber(fiber) {
   scheduleCallback(workloop);
 }
 
-/**
- * 该函数会在每一帧有剩余时间的时候执行
- */
-// function workloop(deadline) {
-//   while (wip && deadline.timeRemaining() > 0) {
-//     // 进入此循环，说明有需要进行处理的 fiber 节点
-//     // 并且目前也有时间来处理
-//     performUnitOfWork(); // 该方法负责处理一个 fiber 节点
-//   }
-//   // 代码来这里，说明要么是没时间，要么就是整个 fiber 树都处理完了
-//   if (!wip) {
-//     // 整个 fiber 树都处理完了
-//     // 将 wipRoot 提交到 DOM 节点上
-//     commitRoot();
-//   }
-// }
+export default scheduleUpdateOnFiber;
+
+// ========== 内部工具函数 ==========
 
 /**
  * 该函数会在每一帧有剩余时间的时候执行
@@ -107,7 +94,7 @@ function performUnitOfWork() {
     return;
   }
 
-  completeWork(wip);    // 没有子节点，完成当前节点
+  completeWork(wip); // 没有子节点，完成当前节点
 
   let next = wip; // 先缓存一下当前的 wip
   while (next) {
@@ -115,8 +102,8 @@ function performUnitOfWork() {
       wip = next.sibling;
       return;
     }
-    next = next.return;   // 没兄弟？往上回溯到父节点
-    completeWork(next);   // 父节点也完成
+    next = next.return; // 没兄弟？往上回溯到父节点
+    completeWork(next); // 父节点也完成
   }
 
   // 整棵 fiber 树遍历完毕
@@ -134,6 +121,3 @@ function commitRoot() {
   // 渲染完成后将 wipRoot 置为 null
   wipRoot = null;
 }
-
-export default scheduleUpdateOnFiber;
-

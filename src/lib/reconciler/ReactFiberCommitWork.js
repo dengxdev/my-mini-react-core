@@ -1,37 +1,94 @@
 import {
-	Placement,
-	Update,
-	updateNode,
-	Passive,
-	Layout,
+  Placement,
+  Update,
+  updateNode,
+  Passive,
+  Layout,
 } from "../shared/utils";
 import {
-	FunctionComponent,
-	ClassComponent,
-	HostComponent,
-	HostText,
-	Fragment,
+  FunctionComponent,
+  ClassComponent,
+  HostComponent,
+  HostText,
+  Fragment,
 } from "./ReactWorkTags";
 
 // 收集所有待执行的 passive effect 对应的 fiber 节点
 let pendingPassiveEffects = [];
+
+/**
+ * 调度被动副作用的执行
+ * 等整棵树 commit 完成后统一调用一次
+ */
+export function flushPendingPassiveEffects() {
+  if (pendingPassiveEffects.length > 0) {
+    setTimeout(() => {
+      flushPassiveEffects();
+    }, 0);
+  }
+}
+
+/**
+ * 提交 fiber 节点及其子节点到 DOM
+ * @param {Object} wip 工作中的 fiber 节点
+ */
+function commitWorker(wip) {
+  if (!wip) return;
+  // 整个 commitWorker 分三步走:
+  // 1. 提交自己
+  // 2. 提交子节点
+  // 3. 提交兄弟节点
+  commitNode(wip); // 提交自己
+  // 处理 deletions: 删除旧 fiber 对应的 DOM
+  if (wip.deletions) {
+    const parentDOM = getParentDOM(wip);
+    wip.deletions.forEach((childToDelete) => {
+      commitDeletion(childToDelete);
+      const dom = getDeletionDom(childToDelete);
+      if (dom && parentDOM) {
+        parentDOM.removeChild(dom);
+      }
+    });
+  }
+
+  commitWorker(wip.child); // 提交子节点
+  commitWorker(wip.sibling); // 提交兄弟节点
+
+  // 处理 Layout 副作用和类组件生命周期(同步执行)
+  if (wip.tag === FunctionComponent || wip.tag === ClassComponent) {
+    commitLifeCycles(wip);
+  }
+
+  // 收集 Passive 副作用，等 commitRoot 完成后统一异步执行
+  if (wip.updateQueue && wip.updateQueue.lastEffect) {
+    const hasPassiveEffects = wip.updateQueue.lastEffect.tag === Passive;
+    if (hasPassiveEffects) {
+      pendingPassiveEffects.push(wip);
+    }
+  }
+}
+
+export default commitWorker;
+
+// ========== 内部工具函数 ==========
+
 /**
  * 获取 fiber 节点的父 DOM 元素
  * @param {Object} wip 工作中的 fiber 节点
  * @returns {HTMLElement} 父 DOM 元素
  */
 function getParentDOM(wip) {
-	let temp = wip;
-	while (temp) {
-		if (temp.tag === ClassComponent) {
-			// 跳过特殊的类组件 因为它有 stateNode 但是不是 DOM 节点，
-			// (类组件 stateNode 保存的实例只是一个包含 render() 方法和 state 的对象)
-			temp = temp.return;
-			continue;
-		}
-		if (temp.stateNode) return temp.stateNode;
-		temp = temp.return;
-	}
+  let temp = wip;
+  while (temp) {
+    if (temp.tag === ClassComponent) {
+      // 跳过特殊的类组件 因为它有 stateNode 但是不是 DOM 节点，
+      // (类组件 stateNode 保存的实例只是一个包含 render() 方法和 state 的对象)
+      temp = temp.return;
+      continue;
+    }
+    if (temp.stateNode) return temp.stateNode;
+    temp = temp.return;
+  }
 }
 
 /**
@@ -41,19 +98,19 @@ function getParentDOM(wip) {
  * @returns {Node|null} 真实 DOM 节点
  */
 function getDeletionDom(fiber) {
-	let node = fiber;
-	while (node) {
-		if (node.tag === ClassComponent) {
-			// 类组件 stateNode 不是 DOM节点
-			node = node.child;
-			continue;
-		}
-		if (node.stateNode) {
-			return node.stateNode;
-		}
-		node = node.child;
-	}
-	return null;
+  let node = fiber;
+  while (node) {
+    if (node.tag === ClassComponent) {
+      // 类组件 stateNode 不是 DOM节点
+      node = node.child;
+      continue;
+    }
+    if (node.stateNode) {
+      return node.stateNode;
+    }
+    node = node.child;
+  }
+  return null;
 }
 
 /**
@@ -61,21 +118,21 @@ function getDeletionDom(fiber) {
  * @param {Object} wip 工作中的 fiber 节点
  */
 function commitNode(wip) {
-	// 1. 首先第一步，我们需要获取该 fiber 所对应的父节点的 DOM 对象
-	const parentNodeDOM = getParentDOM(wip.return);
+  // 1. 首先第一步，我们需要获取该 fiber 所对应的父节点的 DOM 对象
+  const parentNodeDOM = getParentDOM(wip.return);
 
-	// 从 fiber 对象上面拿到 flags 和 stateNode
-	const { flags, stateNode } = wip;
+  // 从 fiber 对象上面拿到 flags 和 stateNode
+  const { flags, stateNode } = wip;
 
-	// 接下来我们需要根据不同的 flags 做不同的操作
-	if (flags & Placement && stateNode) {
-		parentNodeDOM.appendChild(wip.stateNode);
-	}
+  // 接下来我们需要根据不同的 flags 做不同的操作
+  if (flags & Placement && stateNode) {
+    parentNodeDOM.appendChild(wip.stateNode);
+  }
 
-	if (flags & Update && stateNode) {
-		// 这里就应该是更新属性的操作了
-		updateNode(stateNode, wip.alternate.memoizedProps, wip.props);
-	}
+  if (flags & Update && stateNode) {
+    // 这里就应该是更新属性的操作了
+    updateNode(stateNode, wip.alternate.memoizedProps, wip.props);
+  }
 }
 
 /**
@@ -84,22 +141,22 @@ function commitNode(wip) {
  * @param {Object} finishedWork 完成的 fiber 节点
  */
 function commitHookEffectListUnmount(tag, finishedWork) {
-	const updateQueue = finishedWork.updateQueue;
-	const lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
-	if (lastEffect !== null) {
-		const firstEffect = lastEffect.next;
-		let effect = firstEffect;
-		do {
-			if ((effect.tag & tag) === tag) {
-				const destroy = effect.destroy;
-				effect.destroy = undefined;
-				if (destroy !== undefined) {
-					destroy();
-				}
-			}
-			effect = effect.next;
-		} while (effect !== firstEffect);
-	}
+  const updateQueue = finishedWork.updateQueue;
+  const lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
+  if (lastEffect !== null) {
+    const firstEffect = lastEffect.next;
+    let effect = firstEffect;
+    do {
+      if ((effect.tag & tag) === tag) {
+        const destroy = effect.destroy;
+        effect.destroy = undefined;
+        if (destroy !== undefined) {
+          destroy();
+        }
+      }
+      effect = effect.next;
+    } while (effect !== firstEffect);
+  }
 }
 
 /**
@@ -108,19 +165,19 @@ function commitHookEffectListUnmount(tag, finishedWork) {
  * @param {Object} finishedWork 完成的 fiber 节点
  */
 function commitHookEffectListMount(tag, finishedWork) {
-	const updateQueue = finishedWork.updateQueue;
-	const lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
-	if (lastEffect !== null) {
-		const firstEffect = lastEffect.next;
-		let effect = firstEffect;
-		do {
-			if ((effect.tag & tag) === tag) {
-				const create = effect.create;
-				effect.destroy = create();
-			}
-			effect = effect.next;
-		} while (effect !== firstEffect);
-	}
+  const updateQueue = finishedWork.updateQueue;
+  const lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
+  if (lastEffect !== null) {
+    const firstEffect = lastEffect.next;
+    let effect = firstEffect;
+    do {
+      if ((effect.tag & tag) === tag) {
+        const create = effect.create;
+        effect.destroy = create();
+      }
+      effect = effect.next;
+    } while (effect !== firstEffect);
+  }
 }
 
 /**
@@ -128,25 +185,25 @@ function commitHookEffectListMount(tag, finishedWork) {
  * @param {Object} fiber 被删除的 fiber 节点
  */
 function commitDeletion(fiber) {
-	let child = fiber.child;
-	while (child) {
-		commitDeletion(child);
-		child = child.sibling;
-	}
-	if (fiber.tag === ClassComponent) {
-		const instance = fiber.stateNode;
-		if (instance && instance.componentWillUnmount) {
-			// 同步最后已提交的 props/state，保证 cWU 访问到的是正确的"临终状态"
-			instance.props = fiber.memoizedProps || instance.props;
-			instance.state = fiber.memoizedState || instance.state;
-			try {
-				instance.componentWillUnmount();
-			} catch (error) {
-				// 简化处理，没有引入错误边界
-				console.error("Error in componentWillUnmount:", error);
-			}
-		}
-	}
+  let child = fiber.child;
+  while (child) {
+    commitDeletion(child);
+    child = child.sibling;
+  }
+  if (fiber.tag === ClassComponent) {
+    const instance = fiber.stateNode;
+    if (instance && instance.componentWillUnmount) {
+      // 同步最后已提交的 props/state，保证 cWU 访问到的是正确的"临终状态"
+      instance.props = fiber.memoizedProps || instance.props;
+      instance.state = fiber.memoizedState || instance.state;
+      try {
+        instance.componentWillUnmount();
+      } catch (error) {
+        // 简化处理，没有引入错误边界
+        console.error("Error in componentWillUnmount:", error);
+      }
+    }
+  }
 }
 
 /**
@@ -154,40 +211,40 @@ function commitDeletion(fiber) {
  * @param {Object} finishedWork 完成的 fiber 节点
  */
 function commitLifeCycles(finishedWork) {
-	switch (finishedWork.tag) {
-		case FunctionComponent: {
-			if (finishedWork.updateQueue && finishedWork.updateQueue.lastEffect) {
-				commitHookEffectListMount(Layout, finishedWork);
-			}
-			break;
-		}
-		case ClassComponent: {
-			const instance = finishedWork.stateNode;
-			if (!instance) return;
-			if (finishedWork.alternate) {
-				// update 阶段
-				if (typeof instance.componentDidUpdate === "function") {
-					const prevProps = finishedWork.alternate.memoizedProps;
-					const prevState = finishedWork.alternate.memoizedState;
-					try {
-						instance.componentDidUpdate(prevProps, prevState);
-					} catch (error) {
-						console.error("Error in componentDidUpdate:", error);
-					}
-				}
-			} else {
-				// mount 阶段
-				if (typeof instance.componentDidMount === "function") {
-					try {
-						instance.componentDidMount();
-					} catch (error) {
-						console.error("Error in componentDidMount:", error);
-					}
-				}
-			}
-			break;
-		}
-	}
+  switch (finishedWork.tag) {
+    case FunctionComponent: {
+      if (finishedWork.updateQueue && finishedWork.updateQueue.lastEffect) {
+        commitHookEffectListMount(Layout, finishedWork);
+      }
+      break;
+    }
+    case ClassComponent: {
+      const instance = finishedWork.stateNode;
+      if (!instance) return;
+      if (finishedWork.alternate) {
+        // update 阶段
+        if (typeof instance.componentDidUpdate === "function") {
+          const prevProps = finishedWork.alternate.memoizedProps;
+          const prevState = finishedWork.alternate.memoizedState;
+          try {
+            instance.componentDidUpdate(prevProps, prevState);
+          } catch (error) {
+            console.error("Error in componentDidUpdate:", error);
+          }
+        }
+      } else {
+        // mount 阶段
+        if (typeof instance.componentDidMount === "function") {
+          try {
+            instance.componentDidMount();
+          } catch (error) {
+            console.error("Error in componentDidMount:", error);
+          }
+        }
+      }
+      break;
+    }
+  }
 }
 
 /**
@@ -195,74 +252,20 @@ function commitLifeCycles(finishedWork) {
  * @param {Object} finishedWork 完成的 fiber 节点
  */
 function commitPassiveHookEffects(finishedWork) {
-	commitHookEffectListUnmount(Passive, finishedWork);
-	commitHookEffectListMount(Passive, finishedWork);
+  commitHookEffectListUnmount(Passive, finishedWork);
+  commitHookEffectListMount(Passive, finishedWork);
 }
 
 /**
  * 执行待处理的被动副作用
  */
 function flushPassiveEffects() {
-	if (pendingPassiveEffects.length === 0) return;
+  if (pendingPassiveEffects.length === 0) return;
 
-	const effects = pendingPassiveEffects;
-	pendingPassiveEffects = [];
+  const effects = pendingPassiveEffects;
+  pendingPassiveEffects = [];
 
-	effects.forEach((fiber) => {
-		commitPassiveHookEffects(fiber);
-	});
+  effects.forEach((fiber) => {
+    commitPassiveHookEffects(fiber);
+  });
 }
-
-/**
- * 调度被动副作用的执行
- * 等整棵树 commit 完成后统一调用一次
- */
-export function flushPendingPassiveEffects() {
-	if (pendingPassiveEffects.length > 0) {
-		setTimeout(() => {
-			flushPassiveEffects();
-		}, 0);
-	}
-}
-
-/**
- * 提交 fiber 节点及其子节点到 DOM
- * @param {Object} wip 工作中的 fiber 节点
- */
-function commitWorker(wip) {
-	if (!wip) return;
-	// 整个 commitWorker 分三步走:
-	// 1. 提交自己
-	// 2. 提交子节点
-	// 3. 提交兄弟节点
-	commitNode(wip); // 提交自己
-	// 处理 deletions: 删除旧 fiber 对应的 DOM
-	if (wip.deletions) {
-		const parentDOM = getParentDOM(wip);
-		wip.deletions.forEach((childToDelete) => {
-			commitDeletion(childToDelete);
-			const dom = getDeletionDom(childToDelete);
-			if (dom && parentDOM) {
-				parentDOM.removeChild(dom);
-			}
-		});
-	}
-
-	commitWorker(wip.child); // 提交子节点
-	commitWorker(wip.sibling); // 提交兄弟节点
-
-	// 处理 Layout 副作用和类组件生命周期(同步执行)
-	if (wip.tag === FunctionComponent || wip.tag === ClassComponent) {
-		commitLifeCycles(wip);
-	}
-
-	// 收集 Passive 副作用，等 commitRoot 完成后统一异步执行
-	if (wip.updateQueue && wip.updateQueue.lastEffect) {
-		const hasPassiveEffects = wip.updateQueue.lastEffect.tag === Passive;
-		if (hasPassiveEffects) {
-			pendingPassiveEffects.push(wip);
-		}
-	}
-}
-
-export default commitWorker;
