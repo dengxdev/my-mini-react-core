@@ -70,9 +70,7 @@ function workloop() {
       const updates = renderPhaseUpdates;
       renderPhaseUpdates = [];
       // 取第一个更新触发重新渲染（简化处理）
-      if (updates.length > 0) {
-        scheduleUpdateOnFiber(updates[0]);
-      }
+      scheduleUpdateOnFiber(updates[0]);
     }
   }
 }
