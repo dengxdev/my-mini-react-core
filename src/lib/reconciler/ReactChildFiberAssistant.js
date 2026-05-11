@@ -68,8 +68,8 @@ export function linkFiber(returnFiber, lastNewFiber, newFiber) {
 			// newFiber 节点不是 returnFiber 的第一个子 fiber
 			lastNewFiber.sibling = newFiber;
 		}
-		// 更新 lastNewFiber
-		lastNewFiber = newFiber;
+		// 返回新的 lastNewFiber，调用方需要接收
+		return newFiber;
 }
 
 /**

@@ -94,15 +94,15 @@ export function useState(initialState) {
 export function useReducer(reducer, initialState) {
 	// 首先我们要拿到最新的 hook
 	// 这里的 hook 其实是一个对象，里面存储了一些数据
-	// hook ---> {memoizedState: xxx, next: xxx}
-	// hook 对象里面有两个属性，一个 memoizedState 用于存储数据，一个 next 用于指向下一个 hook
+	// hook ---> {memoizedState: xxx, queue: xxx, next: xxx}
 	const hook = updateWorkInProgressHook();
 
 	if (!currentlyRenderingFiber.alternate) {
 		// 说明是首次渲染
 		hook.memoizedState = initialState; // 将当前 hook 的 memoizedState 置为 initialState
-		// 附加 queue 标记，用于 update 阶段区分 state hook 和 effect hook
+		// 初始化 queue，pending 为环形链表头，用于存储待处理的 updates
 		hook.queue = {
+			pending: null,
 			lastRenderedState: initialState,
 		};
 	} else {
@@ -114,12 +114,37 @@ export function useReducer(reducer, initialState) {
 				"This usually happens when hooks are called in a different order between renders."
 			);
 		}
+
+		// 消费 pending updates
+		// dispatch 时只把 update 推入 queue.pending，真正的状态计算在 render 阶段执行
+		const queue = hook.queue;
+		const pending = queue.pending;
+
+		if (pending !== null) {
+			// 解开环形链表，逐个应用 update
+			queue.pending = null;
+			const first = pending.next;
+
+			let newState = hook.memoizedState;
+			let update = first;
+
+			do {
+				const action = update.action;
+				newState = typeof action === "function"
+					? action(newState)
+					: (reducer ? reducer(newState, action) : action);
+				update = update.next;
+			} while (update !== null && update !== first);
+
+			hook.memoizedState = newState;
+			queue.lastRenderedState = newState;
+		}
 	}
 
 	const dispatch = dispatchReducerAction.bind(
 		null,
 		currentlyRenderingFiber,
-		hook,
+		hook.queue,
 		reducer,
 	);
 
@@ -305,28 +330,37 @@ function updateWorkInProgressHook() {
 	// 旧 fiber
 	const current = currentlyRenderingFiber.alternate; 
 	if (current) {
-		// update 阶段，尝试复用旧 fiber 上的 hook 链表
-		currentlyRenderingFiber.memoizedState = current.memoizedState;
+		// update 阶段，基于旧 fiber 的 hook 链表逐个克隆新节点
 		if (workInProgressHook) {
-			// 第 N 次调用（N > 1），沿链表往后走
-			workInProgressHook = targetHook = workInProgressHook.next;
+			// 第 N 次调用（N > 1），基于 currentHook 克隆新节点
 			currentHook = currentHook.next;
+			if (!currentHook) {
+				throw new Error(
+					"Rendered more hooks than during the previous render."
+				);
+			}
+			const newHook = {
+				memoizedState: currentHook.memoizedState,
+				queue: currentHook.queue,
+				next: null,
+			};
+			workInProgressHook = workInProgressHook.next = newHook;
+			targetHook = newHook;
 		} else {
-			// 第一次调用, 取链表头
-			workInProgressHook = targetHook = currentlyRenderingFiber.memoizedState;
+			// 第一次调用, 取链表头并克隆
 			currentHook = current.memoizedState;
-		}
-
-		// Hook 规则检查 2: 检查本次渲染的 hook 数量是否超过上次（检测到条件分支中新增 hook 调用）
-		if (!targetHook) {
-			throw new Error(
-				"Rendered more hooks than during the previous render."
-			);
+			targetHook = {
+				memoizedState: currentHook.memoizedState,
+				queue: currentHook.queue,
+				next: null,
+			};
+			workInProgressHook = currentlyRenderingFiber.memoizedState = targetHook;
 		}
 	} else {
 		// mount 阶段，没有旧 fiber，创建新的 hook 链表
 		targetHook = {
 			memoizedState: null, // 存储数据
+			queue: null,
 			next: null, // 指向下一个 hook
 		};
 		if (workInProgressHook) {
@@ -341,43 +375,37 @@ function updateWorkInProgressHook() {
 }
 
 /**
- * 处理状态更新，计算最新状态并调度重新渲染
+ * 处理状态更新，将 update 推入 queue.pending 环形链表并调度重新渲染
+ * 注意：dispatch 阶段不计算最终状态，状态在下次 render 的 useReducer/useState 中统一消费
  * @param {Object} fiber 当前正在处理的 fiber 对象
- * @param {Object} hook 当前正在处理的 hook 对象
+ * @param {Object} queue 当前 hook 的更新队列
  * @param {Function|null} reducer 状态更新的 reducer 函数，useState 时为 null
  * @param {*} action 状态更新的 action，useState 时为新状态值或更新函数
  */
-function dispatchReducerAction(fiber, hook, reducer, action) {
-	// 计算最新的状态
-	const newValue = reducer
-		? reducer(hook.memoizedState)
-		: typeof action === "function"
-			? action(hook.memoizedState)
-			: action;
+function dispatchReducerAction(fiber, queue, reducer, action) {
+	// 1. 创建 Update 对象（存储 action，而非计算后的值）
+	const update = {
+		action,
+		next: null,
+	};
 
-	// 如果状态没有变化，直接返回
-	if (Object.is(hook.memoizedState, newValue)) {
-		return;
+	// 2. 将 update 插入 queue.pending 环形链表
+	if (queue.pending === null) {
+		update.next = update;
+	} else {
+		update.next = queue.pending.next;
+		queue.pending.next = update;
 	}
+	queue.pending = update;
 
-	// 更新状态
-	hook.memoizedState = newValue;
-
-	// 处理 fiber 对象
+	// 3. 克隆 fiber，准备重新渲染
 	fiber.alternate = { ...fiber };
 	fiber.sibling = null;
 
-	// 同步更新 queue 中的记录（如果存在）
-	if (hook.queue) {
-		hook.queue.lastRenderedState = newValue;
-	}
-
-	// 检查是否需要批处理
+	// 4. 调度重渲染
 	if (getIsBatchingUpdates()) {
-		// 将更新操作加入队列
 		enqueueUpdate(() => scheduleUpdateOnFiber(fiber));
 	} else {
-		// 立即执行更新
 		scheduleUpdateOnFiber(fiber);
 	}
 }

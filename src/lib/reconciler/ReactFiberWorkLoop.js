@@ -25,7 +25,7 @@ function scheduleUpdateOnFiber(fiber) {
 
   // 向上找到根 fiber，确保始终从根开始渲染
   let node = fiber;
-  while (node.return) {
+  while (node.return && node.return.tag !== undefined) {
     node = node.return;
   }
 
@@ -103,7 +103,9 @@ function performUnitOfWork() {
       return;
     }
     next = next.return; // 没兄弟？往上回溯到父节点
-    completeWork(next); // 父节点也完成
+    if (next) {
+      completeWork(next); // 父节点也完成
+    }
   }
 
   // 整棵 fiber 树遍历完毕

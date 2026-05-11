@@ -82,7 +82,7 @@ export function reconcileChildren(returnFiber, children) {
 		lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, i, isUpdate);
 
 		// 链接到 fiber 链表
-		linkFiber(returnFiber, lastNewFiber, newFiber);
+		lastNewFiber = linkFiber(returnFiber, lastNewFiber, newFiber);
 		// 更新 oldFiber，为下一个新 vnode 节点做准备
 		oldFiber = nextOldFiber;
 	}
@@ -105,7 +105,7 @@ export function reconcileChildren(returnFiber, children) {
 			// 更新 lastPlacedIndex 以及标记 Placement 的 flags
 			lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, i, isUpdate);
       // 链接到 fiber 链表
-			linkFiber(returnFiber, lastNewFiber, newFiber);
+			lastNewFiber = linkFiber(returnFiber, lastNewFiber, newFiber);
 		}
 	}
 
@@ -139,7 +139,7 @@ export function reconcileChildren(returnFiber, children) {
 		lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, i, isUpdate);
 
 		// 链接到 fiber 链表
-    linkFiber(returnFiber, lastNewFiber, newFiber);
+    lastNewFiber = linkFiber(returnFiber, lastNewFiber, newFiber);
 	}
 
 	// 5. 对于 Map 中剩余的旧节点，标记为删除，在 commit 阶段统一处理。
