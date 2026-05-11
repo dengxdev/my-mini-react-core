@@ -1,0 +1,25 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]: "1"
+      - paragraph [ref=e7]: "2"
+    - generic [ref=e8]:
+      - paragraph [ref=e9]: "3"
+      - paragraph [ref=e10]: "4"
+  - paragraph [ref=e11]: this is a tes1
+  - generic [ref=e12]:
+    - button "-1" [ref=e13]
+    - text: "1"
+    - button "+1" [ref=e14]
+    - text: （基础 useState）
+  - generic [ref=e15]:
+    - button "批量 +1 x3" [ref=e16]
+    - text: 1（批量更新：预期只 +1）
+  - generic [ref=e17]:
+    - button "函数式 +1 x3" [ref=e18]
+    - text: 0（函数式更新：预期 +3）
+  - generic [ref=e19]:
+    - button "-10" [ref=e20]
+    - text: "100"
+    - button "+10" [ref=e21]
+    - text: （useReducer）
