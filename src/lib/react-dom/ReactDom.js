@@ -51,6 +51,7 @@ function updateContainer(element, container) {
     // 该对象就是我的父 fiber 对象，里面会放置一些核心的属性
     type: container.nodeName.toLowerCase(),
     stateNode: container,
+    _isContainer: true,
   });
   // 到目前为止，就创建了第一个 fiber 对象
   // 但是目前仅仅只有最外层的父元素创建了对应的 fiber 对象

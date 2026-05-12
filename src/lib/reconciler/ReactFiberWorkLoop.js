@@ -25,7 +25,7 @@ function scheduleUpdateOnFiber(fiber) {
 
   // 向上找到根 fiber，确保始终从根开始渲染
   let node = fiber;
-  while (node.return && node.return.tag !== undefined) {
+  while (node.return && !node.return._isContainer) {
     node = node.return;
   }
 

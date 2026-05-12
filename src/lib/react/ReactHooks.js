@@ -103,7 +103,7 @@ export function useReducer(reducer, initialState) {
 		// 初始化 queue，pending 为环形链表头，用于存储待处理的 updates
 		hook.queue = {
 			pending: null,
-			
+			lastRenderedState: initialState,
 		};
 	} else {
 		// 更新阶段：数据结构自检
@@ -137,6 +137,7 @@ export function useReducer(reducer, initialState) {
 			} while (update !== null && update !== first);
 
 			hook.memoizedState = newState;
+			queue.lastRenderedState = newState;
 		}
 	}
 
@@ -380,8 +381,26 @@ function updateWorkInProgressHook() {
  * @param {Function|null} reducer 状态更新的 reducer 函数，useState 时为 null
  * @param {*} action 状态更新的 action，useState 时为新状态值或更新函数
  */
-function dispatchReducerAction(fiber, queue, _reducer, action) {
-	// 注意：_reducer 在 dispatch 阶段不需要使用，状态计算在 useReducer update 阶段完成
+function basicStateReducer(state, action) {
+	return typeof action === "function" ? action(state) : action;
+}
+
+function dispatchReducerAction(fiber, queue, reducer, action) {
+	// Eager State Bailout 优化：queue 为空时，预先计算新状态
+	if (queue.pending === null) {
+		const currentState = queue.lastRenderedState;
+		const eagerReducer = reducer !== null ? reducer : basicStateReducer;
+		try {
+			const eagerState = eagerReducer(currentState, action);
+			if (Object.is(eagerState, currentState)) {
+				// 状态没变，直接 bailout，不调度重新渲染
+				return;
+			}
+		} catch (error) {
+			// suppress error，让它在 render 阶段再次抛出
+		}
+	}
+
 	// 1. 创建 Update 对象（存储 action，而非计算后的值）
 	const update = {
 		action,
