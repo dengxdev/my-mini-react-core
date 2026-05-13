@@ -10,9 +10,9 @@ import {
 	flushUpdates,
 } from "../shared/batch";
 
-let currentlyRenderingFiber = null;	// 当前正在渲染的 fiber 对象
-let workInProgressHook = null;	// wip 上 hook 链表的当前游标/尾部
-let currentHook = null;	// current（旧 fiber）上 hook 链表的当前游标
+let currentlyRenderingFiber = null; // 当前正在渲染的 fiber 对象
+let workInProgressHook = null; // wip 上 hook 链表的当前游标/尾部
+let currentHook = null; // current（旧 fiber）上 hook 链表的当前游标
 
 /**
  * 初始化函数组件的 Hooks 环境，准备开始新的渲染
@@ -92,9 +92,6 @@ export function useState(initialState) {
  * @param {*} initialState 初始化状态
  */
 export function useReducer(reducer, initialState) {
-	// 首先我们要拿到最新的 hook
-	// 这里的 hook 其实是一个对象，里面存储了一些数据
-	// hook ---> {memoizedState: xxx, queue: xxx, next: xxx}
 	const hook = updateWorkInProgressHook();
 
 	if (!currentlyRenderingFiber.alternate) {
@@ -111,7 +108,7 @@ export function useReducer(reducer, initialState) {
 		if (hook.queue === undefined || hook.queue === null) {
 			throw new Error(
 				"Hook structure mismatch: expected a state/reducer hook but got a different type. " +
-				"This usually happens when hooks are called in a different order between renders."
+					"This usually happens when hooks are called in a different order between renders.",
 			);
 		}
 
@@ -125,19 +122,29 @@ export function useReducer(reducer, initialState) {
 			queue.pending = null;
 			const first = pending.next;
 
-			let newState = hook.memoizedState;
-			let update = first;
+			// 如果 eagerState 缓存存在，且当前只有一个 update，直接复用
+			if (queue.eagerState !== undefined && first.next === first) {
+				hook.memoizedState = queue.eagerState;
+				queue.lastRenderedState = queue.eagerState;
+			} else {
+				let newState = hook.memoizedState;
+				let update = first;
 
-			do {
-				const action = update.action;
-				newState = typeof action === "function"
-					? action(newState)
-					: (reducer ? reducer(newState, action) : action);
-				update = update.next;
-			} while (update !== null && update !== first);
+				do {
+					const action = update.action;
+					newState =
+						typeof action === "function"
+							? action(newState)
+							: reducer
+								? reducer(newState, action)
+								: action;
+					update = update.next;
+				} while (update !== null && update !== first);
 
-			hook.memoizedState = newState;
-			queue.lastRenderedState = newState;
+				hook.memoizedState = newState;
+				queue.lastRenderedState = newState;
+			}
+			queue.eagerState = undefined;
 		}
 	}
 
@@ -174,14 +181,16 @@ export function useEffect(create, deps) {
 		if (prevEffect !== null && !isValidEffect) {
 			throw new Error(
 				"Hook structure mismatch: expected an effect hook but got a different type. " +
-				"This usually happens when hooks are called in a different order between renders."
+					"This usually happens when hooks are called in a different order between renders.",
 			);
 		}
 
 		if (isValidEffect) {
 			const prevDeps = prevEffect.deps;
 			if (nextDeps !== null) {
-				const depsEqual = nextDeps.every((dep, i) => Object.is(dep, prevDeps[i]));
+				const depsEqual = nextDeps.every((dep, i) =>
+					Object.is(dep, prevDeps[i]),
+				);
 				if (depsEqual) {
 					// 依赖未变，不用推入新的副作用
 					return;
@@ -216,7 +225,7 @@ export function useLayoutEffect(create, deps) {
 		if (prevEffect !== null && !isValidEffect) {
 			throw new Error(
 				"Hook structure mismatch: expected a layout effect hook but got a different type. " +
-				"This usually happens when hooks are called in a different order between renders."
+					"This usually happens when hooks are called in a different order between renders.",
 			);
 		}
 
@@ -253,7 +262,7 @@ export function useCallback(callback, deps) {
 
 	hook.memoizedState = {
 		value: callback,
-		deps: nextDeps
+		deps: nextDeps,
 	};
 
 	return callback;
@@ -282,7 +291,7 @@ export function useMemo(create, deps) {
 	const memoizedValue = create();
 	hook.memoizedState = {
 		value: memoizedValue,
-		deps: nextDeps
+		deps: nextDeps,
 	};
 
 	return memoizedValue;
@@ -295,18 +304,18 @@ export function useMemo(create, deps) {
  * @returns {boolean} 是否相等
  */
 function areHookInputsEqual(nextDeps, prevDeps) {
-  if (prevDeps === null) {
-    return false;
-  }
-  if (prevDeps.length !== nextDeps.length) {
-    return false;
-  }
-  for (let i = 0; i < prevDeps.length; i++) {
-    if (!Object.is(nextDeps[i], prevDeps[i])) {
-      return false;
-    }
-  }
-  return true;
+	if (prevDeps === null) {
+		return false;
+	}
+	if (prevDeps.length !== nextDeps.length) {
+		return false;
+	}
+	for (let i = 0; i < prevDeps.length; i++) {
+		if (!Object.is(nextDeps[i], prevDeps[i])) {
+			return false;
+		}
+	}
+	return true;
 }
 
 /**
@@ -320,23 +329,21 @@ function updateWorkInProgressHook() {
 	// Hook 规则检查 1: 确保在函数组件内部调用
 	if (!currentlyRenderingFiber) {
 		throw new Error(
-			"Hooks can only be called inside the body of a function component."
+			"Hooks can only be called inside the body of a function component.",
 		);
 	}
 
 	// 这个变量就是存储最终我们要向外部返回的 hook
 	let targetHook = null;
 	// 旧 fiber
-	const current = currentlyRenderingFiber.alternate; 
+	const current = currentlyRenderingFiber.alternate;
 	if (current) {
 		// update 阶段，基于旧 fiber 的 hook 链表逐个克隆新节点
 		if (workInProgressHook) {
 			// 第 N 次调用（N > 1），基于 currentHook 克隆新节点
 			currentHook = currentHook.next;
 			if (!currentHook) {
-				throw new Error(
-					"Rendered more hooks than during the previous render."
-				);
+				throw new Error("Rendered more hooks than during the previous render.");
 			}
 			const newHook = {
 				memoizedState: currentHook.memoizedState,
@@ -392,10 +399,9 @@ function dispatchReducerAction(fiber, queue, reducer, action) {
 		const eagerReducer = reducer !== null ? reducer : basicStateReducer;
 		try {
 			const eagerState = eagerReducer(currentState, action);
-			if (Object.is(eagerState, currentState)) {
-				// 状态没变，直接 bailout，不调度重新渲染
-				return;
-			}
+			// 状态没变，直接 bailout，不调度重新渲染
+			if (Object.is(eagerState, currentState)) return;
+			queue.eagerState = eagerState;
 		} catch (error) {
 			// suppress error，让它在 render 阶段再次抛出
 		}
