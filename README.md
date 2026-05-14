@@ -171,7 +171,7 @@ pnpm test
 
 - [ ] **Suspense 边界机制**
   - 支持子树 `throw Promise` → 捕获到 Suspense boundary → 切换 fallback UI → Promise resolve 后恢复真实内容
-  - 这是 React 并发特性的门面，面试必问。参考源码：`ReactFiberSuspenseComponent.js`、`ReactFiberThenable.js`
+  - 参考源码：`ReactFiberSuspenseComponent.js`、`ReactFiberThenable.js`
 
 - [ ] **Error Boundary（错误边界）**
   - 类组件支持 `static getDerivedStateFromError` + `componentDidCatch`
