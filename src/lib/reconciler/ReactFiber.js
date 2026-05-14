@@ -6,6 +6,47 @@ import {
 	HostText,
 	Fragment,
 } from "./ReactWorkTags";
+
+/**
+ * 基于 current fiber 创建或复用 work-in-progress fiber
+ * 这是 React 双缓冲机制的核心：current 树在渲染期间只读，所有修改发生在 WIP 树上
+ * @param {Object} current current tree 上的 fiber 节点
+ * @returns {Object} work-in-progress fiber 节点
+ */
+export function createWorkInProgress(current) {
+	let wip = current.alternate;
+	if (wip === null) {
+		// 首次创建 WIP：基于 current 克隆一个骨架
+		wip = {
+			type: current.type,
+			key: current.key,
+			props: current.props,
+			stateNode: current.stateNode,
+			child: null,
+			sibling: null,
+			return: current.return,
+			flags: NoFlags,
+			index: current.index,
+			alternate: current,
+			memoizedProps: current.memoizedProps,
+			memoizedState: current.memoizedState,
+			updateQueue: current.updateQueue,
+			tag: current.tag,
+		};
+		current.alternate = wip;
+	} else {
+		// 复用已有的 WIP：重置副作用相关的字段，同步最新的 props/state
+		wip.props = current.props;
+		wip.flags = NoFlags;
+		wip.child = null;
+		wip.sibling = null;
+		wip.deletions = null;
+		wip.updateQueue = null;
+		wip.memoizedState = current.memoizedState;
+		wip.memoizedProps = current.memoizedProps;
+	}
+	return wip;
+}
 /**
  *
  * @param {*} vnode 当前的 vnode 节点

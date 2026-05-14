@@ -3,6 +3,8 @@ import beginWork from "./ReactFiberBeginWork";
 import completeWork from "./ReactFiberCompleteWork";
 import commitWorker, { flushPendingPassiveEffects } from "./ReactFiberCommitWork";
 import scheduleCallback, { shouldYieldToHost } from "../scheduler/Scheduler";
+import { createWorkInProgress } from "./ReactFiber";
+import { NoLane, DefaultLane, SyncLane } from "../shared/utils";
 
 // wip 的全称为 work in progress，表示正在进行的工作
 // 当前正在进行的工作 fiber 对象
@@ -15,11 +17,19 @@ let wipRoot = null;
 let isRendering = false;
 // 存储渲染阶段产生的更新，等当前渲染完成后再触发
 let renderPhaseUpdates = [];
+// Lane 模型：高优先级更新打断低优先级渲染的标志
+let shouldInterrupt = false;
+// 当前渲染的 lane
+let currentRenderLane = NoLane;
 
-function scheduleUpdateOnFiber(fiber) {
+function scheduleUpdateOnFiber(fiber, lane = DefaultLane) {
   // 渲染阶段调用 setState，暂存更新，等当前渲染完成后再触发
   if (isRendering) {
-    renderPhaseUpdates.push(fiber);
+    // Lane 模型：如果新更新的优先级更高，标记需要打断当前渲染
+    if (lane < currentRenderLane) {
+      shouldInterrupt = true;
+    }
+    renderPhaseUpdates.push({ fiber, lane });
     return;
   }
 
@@ -29,14 +39,24 @@ function scheduleUpdateOnFiber(fiber) {
     node = node.return;
   }
 
-  wip = node;
-  wipRoot = node;
+  // 不直接用 current 节点作为 wip，而是创建一个新的 WIP 根
+  // 这样即使渲染被中断或出错，current tree 的结构依然是完整的
+  const wipNode = createWorkInProgress(node);
+  wipNode.sibling = null; // 现在动的是 WIP，不是 current
+  wipNode.lane = lane;    // 记录本次更新的 lane，供 workloop 使用
+  wip = wipNode;
+  wipRoot = wipNode;
 
-  // 先使用 requestIdleCallback 来进行调用
-  // 后期使用 scheduler 包来进行调用
-  // 当浏览器的每一帧有空闲时间的时候，就会执行 workloop 函数
-  // requestIdleCallback(workloop);
-  scheduleCallback(workloop);
+  if (lane === SyncLane) {
+    // 同步 lane：不走 Scheduler，直接 flushSync
+    let result;
+    do {
+      result = workloop();
+    } while (result === workloop);
+  } else {
+    // 默认 lane：走 Scheduler 调度
+    scheduleCallback(workloop);
+  }
 }
 
 export default scheduleUpdateOnFiber;
@@ -49,11 +69,13 @@ export default scheduleUpdateOnFiber;
  */
 function workloop() {
   isRendering = true;
+  currentRenderLane = wipRoot && wipRoot.lane ? wipRoot.lane : NoLane;
   try {
     while (wip) {
-      // 检查是否应该让出主线程（超过 5ms）
-      if (shouldYieldToHost()) {
-        // 时间用完，返回函数让调度器知道还有工作要做
+      // 检查是否应该让出主线程（超过 5ms）或被高优先级更新打断
+      if (shouldYieldToHost() || shouldInterrupt) {
+        shouldInterrupt = false;
+        // 时间用完或被中断，返回函数让调度器知道还有工作要做
         return workloop;
       }
       performUnitOfWork(); // 该方法负责处理一个 fiber 节点
@@ -65,12 +87,13 @@ function workloop() {
     return undefined;
   } finally {
     isRendering = false;
+    currentRenderLane = NoLane;
     // 处理渲染阶段产生的更新
     if (renderPhaseUpdates.length > 0) {
       const updates = renderPhaseUpdates;
       renderPhaseUpdates = [];
       // 取第一个更新触发重新渲染（简化处理）
-      scheduleUpdateOnFiber(updates[0]);
+      scheduleUpdateOnFiber(updates[0].fiber, updates[0].lane);
     }
   }
 }

@@ -2,7 +2,7 @@
  * 该模块用于实现各种 Hooks
  */
 import scheduleUpdateOnFiber from "../reconciler/ReactFiberWorkLoop";
-import { Passive, Layout } from "../shared/utils";
+import { Passive, Layout, currentUpdateLane, DefaultLane, SyncLane } from "../shared/utils";
 import {
 	enqueueUpdate,
 	flushSync as flushSyncImpl,
@@ -367,9 +367,12 @@ function dispatchReducerAction(fiber, queue, reducer, action) {
 	}
 
 	// 1. 创建 Update 对象（存储 action，而非计算后的值）
+	// Lane 模型：根据当前全局上下文决定更新的优先级
+	const lane = currentUpdateLane;
 	const update = {
 		action,
 		next: null,
+		lane,
 	};
 
 	// 2. 将 update 插入 queue.pending 环形链表
@@ -383,11 +386,18 @@ function dispatchReducerAction(fiber, queue, reducer, action) {
 
 	// 3. 克隆 fiber，准备重新渲染
 	fiber.alternate = { ...fiber };
-	// 防止 workloop 错误遍历到兄弟节点
-	fiber.sibling = null;
+	// 【已重构】不再直接修改 current fiber 的 sibling
+	// 以前这里写了 fiber.sibling = null，现在改为在 scheduleUpdateOnFiber 中
+	// 通过 createWorkInProgress 创建 WIP 根节点，在 WIP 上切断 sibling
 
-	// 4. 调度重渲染（统一入队，由微任务批处理合并为一次渲染）
-	enqueueUpdate(() => scheduleUpdateOnFiber(fiber));
+	// 4. 调度重渲染
+	// Lane 模型：SyncLane 直接同步执行，不走微任务批处理
+	if (lane === SyncLane) {
+		scheduleUpdateOnFiber(fiber, SyncLane);
+	} else {
+		// 统一入队，由微任务批处理合并为一次渲染
+		enqueueUpdate(() => scheduleUpdateOnFiber(fiber, lane));
+	}
 }
 
 /**

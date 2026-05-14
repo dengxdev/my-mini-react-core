@@ -19,6 +19,7 @@
 ### 1. Fiber 架构
 - 完整的 Fiber 链表结构（child / sibling / return）
 - 双缓冲机制（current ↔ workInProgress），支持更新时复用旧节点
+- **WIP 树隔离**：渲染期间所有修改发生在 WIP 树上，current tree 保持只读
 
 ### 2. 调度器 Scheduler
 - 基于 `MessageChannel` 的宏任务调度（和 React 18 一致）
@@ -42,6 +43,11 @@
 - Fragment
 - Host Component（原生 DOM 标签）
 
+### 6. Lane 模型简化版
+- 定义 `SyncLane`（同步，不可打断）和 `DefaultLane`（默认，可调度）
+- `flushSync` 期间自动升级为 SyncLane，直接同步执行 workloop
+- workloop 中预留 `shouldInterrupt` 钩子，支持高优先级打断低优先级渲染的代码路径
+
 ## 项目结构
 
 ```
@@ -52,8 +58,8 @@ src/lib
 ├── react-dom/                # DOM 渲染器
 │   └── ReactDom.js
 ├── reconciler/               # 协调器（核心中的核心）
-│   ├── ReactFiber.js         # Fiber 节点创建
-│   ├── ReactFiberWorkLoop.js # 工作循环 + 调度入口
+│   ├── ReactFiber.js         # Fiber 节点创建 + createWorkInProgress
+│   ├── ReactFiberWorkLoop.js # 工作循环 + 调度入口 + Lane 分发
 │   ├── ReactFiberBeginWork.js
 │   ├── ReactFiberCompleteWork.js
 │   ├── ReactFiberCommitWork.js
@@ -63,9 +69,31 @@ src/lib
 ├── scheduler/                # 调度器
 │   ├── Scheduler.js          # MessageChannel + 时间片
 │   └── SchedulerMinHeap.js   # 任务优先级队列
-└── shared/                   # 工具函数 + 标志位
+└── shared/                   # 工具函数 + 标志位 + Lane 常量
     ├── batch.js              # 批量更新
     └── utils.js
+```
+
+## 架构流程图
+
+```mermaid
+flowchart TD
+    A[用户触发 setState] --> B[dispatchReducerAction]
+    B --> C[创建 Update 推入 pending 环形链表]
+    C --> D[scheduleUpdateOnFiber]
+    D --> E[向上找到根 Fiber]
+    E --> F[createWorkInProgress 创建 WIP 根]
+    F --> G{判断 lane}
+    G -->|SyncLane| H[直接同步执行 workloop]
+    G -->|DefaultLane| I[Scheduler MessageChannel 调度 workloop]
+    H --> J[workloop --> performUnitOfWork]
+    I --> J
+    J --> K[beginWork --> renderWithHooks]
+    K --> L[reconcileChildren Diff 算法]
+    L --> M[completeWork]
+    M --> J
+    M --> N[commitRoot --> commitWorker]
+    N --> O[commitLifeCycles + flushPassiveEffects]
 ```
 
 ## 本地运行
@@ -77,6 +105,17 @@ pnpm dev
 
 `App.jsx` 里可以直接用你自己实现的 React API（项目里我配了 alias，`react` 和 `react-dom` 会指向 `src/lib`）。
 
+## 核心测试
+
+```bash
+pnpm test
+```
+
+覆盖范围：
+- **Diff 算法**：复用、删除、移动、初次渲染 Placement
+- **Hooks**：useState/useReducer mount & update、函数式更新、hook 错位检测、effect tag 标记
+- **批处理**：同一事件循环合并、flushSync 同步执行
+
 ## 我踩过的一些坑（面试时能聊半小时）
 
 ### 坑 1：`linkFiber` 按值传递导致 sibling 链表断裂
@@ -86,7 +125,7 @@ pnpm dev
 最初实现 `scheduleUpdateOnFiber` 时，`while (node.return)` 会一直往上遍历到根节点之外，把 `_isContainer` 容器对象也当成了 fiber，导致后续 `beginWork` 时拿到一个根本不是 fiber 的东西，直接报错。修复方式是在循环条件里加了 `node.return.tag !== undefined`，确保停在真正的 fiber 上。这件事让我意识到 React 的"根"其实有两层：容器（container）和根 fiber（root fiber）。
 
 ### 坑 3：useEffect 和 useLayoutEffect 的执行时机
-最早我把 useEffect 的 cleanup 和执行都塞进了 `commitWorker` 的同步递归里，结果 useEffect 的回调在 DOM 更新前就执行了，而且每次 commit 节点都会触发一次，性能稀烂。后来改成在 `commitWorker` 阶段只收集Passive Effect，等整棵树 commit 完成后统一用 `setTimeout` 异步 flush。这才和 React 真正的行为对齐：useLayoutEffect 同步（浏览器绘制前），useEffect 异步（绘制后）。
+最早我把 useEffect 的 cleanup 和执行都塞进了 `commitWorker` 的同步递归里，结果 useEffect 的回调在 DOM 更新前就执行了，而且每次 commit 节点都会触发一次，性能稀烂。后来改成在 `commitWorker` 阶段只收集 Passive Effect，等整棵树 commit 完成后统一用 `setTimeout` 异步 flush。这才和 React 真正的行为对齐：useLayoutEffect 同步（浏览器绘制前），useEffect 异步（绘制后）。
 
 ### 坑 4：渲染阶段触发 setState 导致死循环
 如果没有防护，在 `renderWithHooks` 里调用 `setState` 会立刻修改 `wip`，而 `wip` 正在被遍历，结果就是无限重新调度。我加了 `isRendering` 锁和 `renderPhaseUpdates` 队列：渲染阶段产生的更新先暂存，等当前轮次的 `commitRoot` 结束后再统一触发。这也解释了为什么 React 源码里有一堆 `didScheduleRenderPhaseUpdate` 的判断。
@@ -97,8 +136,16 @@ pnpm dev
 ### 坑 6：Eager State Bailout —— 状态没变就不该 render
 有一次写 Counter，点击按钮设置同样的数字，发现组件还是会重新走一遍完整渲染链路。排查后发现 `dispatchReducerAction` 没有把"新状态和旧状态相同"的情况过滤掉。后来引入了 `eagerState` 缓存：在 dispatch 阶段就预跑一遍 reducer，如果 `Object.is` 判定相同，直接 return，不走任何调度。这个优化在 React 源码里叫 Eager State Reducer。
 
-### 坑 7：直接修改 current fiber 的 sibling（正在重构）
-最初为了限制 work loop 的遍历范围，我在 `dispatchReducerAction` 里直接写了 `fiber.sibling = null`。后来意识到这破坏了 current tree 的只读原则——React 的哲学是 current 不可变，所有修改应该在 WIP 树上进行。后续计划重构为在 `scheduleUpdateOnFiber` 里创建 WIP 根节点，把 sibling 的切断放在 WIP 树上。
+### 坑 7：直接修改 current fiber 的 sibling（已重构 ✅）
+最初为了限制 work loop 的遍历范围，我在 `dispatchReducerAction` 里直接写了 `fiber.sibling = null`。后来意识到这破坏了 current tree 的只读原则——React 的哲学是 current 不可变，所有修改应该在 WIP 树上进行。
+
+**重构过程**：
+1. 在 `ReactFiber.js` 中新增了 `createWorkInProgress`，实现了双缓冲机制中"基于 current 创建 WIP"的标准流程
+2. 在 `scheduleUpdateOnFiber` 中，不再直接把 current 节点赋值给 `wip`，而是调用 `createWorkInProgress(node)` 创建一个新的 WIP 根节点
+3. 把 `wip.sibling = null` 的切断逻辑从 `dispatchReducerAction` 迁移到 `scheduleUpdateOnFiber` 中，现在动的是 WIP 树，不是 current 树
+4. 即使渲染被中断或出错，current tree 的结构依然保持完整
+
+> 面试话术："我最初在 dispatch 阶段为了简化，直接写了 `fiber.sibling = null` 来限制 work loop 的遍历范围。但后来 review 代码时发现这违反了 React 的只读原则——current tree 不应该在渲染期间被修改。所以我重构了 `scheduleUpdateOnFiber`，在设置 `wip` 时通过 `createWorkInProgress` 创建一个新的 WIP 根节点，把 sibling 的切断放在 WIP 树上。这样即使渲染被中断或出错，current tree 的结构依然是完整的。"
 
 ## 和 React 源码的差异
 
@@ -108,16 +155,17 @@ pnpm dev
 |------|--------|---------------|
 | 调度器 | MessageChannel + 时间片 | 同上，但源码还有优先级通道 |
 | Diff | 两轮遍历 + Map | 基本一致 |
-| 并发模型 | 协作式调度（可让出） | Lane 模型 + 优先级中断 |
+| 并发模型 | **Lane 模型简化版（SyncLane + DefaultLane + 可打断骨架）** | 完整 Lane 模型 + 31 条优先级位运算 |
 | Hooks | 基础 Hooks | 完整 Hooks + 内部优化 |
+| WIP 树 | 已引入 `createWorkInProgress`，current 只读 | 完整双缓冲 + 复用池 |
 | Suspense | ❌ 未实现 | ✅ |
 | Error Boundary | ❌ 未实现 | ✅ |
 
 ## 后续计划
 
-- [ ] 重构 `fiber.sibling = null`，改为在 WIP 树上控制遍历范围
-- [ ] 引入 Lane 模型简化版，实现高优先级更新打断低优先级渲染
-- [ ] 补充核心链路测试（Diff、Hooks、Scheduler）
+- [x] 重构 `fiber.sibling = null`，改为在 WIP 树上控制遍历范围
+- [x] 引入 Lane 模型简化版，实现高优先级更新打断低优先级渲染的代码骨架
+- [x] 补充核心链路测试（Diff、Hooks、Scheduler）
 - [ ] 尝试实现最简版 Suspense
 
 ## 关于我

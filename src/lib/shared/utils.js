@@ -14,6 +14,17 @@ export const Deletion = 0b0000000000000000001000; // 8
 export const Passive = 0b0000000000000000010000; // 16   useEffect
 export const Layout = 0b0000000000000000100000; // 32   useLayoutEffect
 
+// Lane 模型（简化版）
+export const NoLane = 0;
+export const SyncLane = 1;      // 001  同步优先级：flushSync、原生事件
+export const DefaultLane = 2;   // 010  默认优先级：普通 setState
+
+// 当前更新使用的 lane，用于在 dispatch 阶段判断优先级
+export let currentUpdateLane = DefaultLane;
+export function setCurrentUpdateLane(lane) {
+	currentUpdateLane = lane;
+}
+
 /**
  * 判断参数 s 是否为字符串
  * @param {*} s
