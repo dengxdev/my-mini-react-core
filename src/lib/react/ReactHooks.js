@@ -4,10 +4,9 @@
 import scheduleUpdateOnFiber from "../reconciler/ReactFiberWorkLoop";
 import { Passive, Layout } from "../shared/utils";
 import {
-	getIsBatchingUpdates,
-	setIsBatchingUpdates,
 	enqueueUpdate,
-	flushUpdates,
+	flushSync as flushSyncImpl,
+	batchedUpdates as batchedUpdatesImpl,
 } from "../shared/batch";
 
 let currentlyRenderingFiber = null; // 当前正在渲染的 fiber 对象
@@ -35,48 +34,8 @@ export function renderWithHooks(wip) {
  * @param {Function} fn 需要同步执行的函数
  * @returns {*} 函数执行的返回值
  */
-export function flushSync(fn) {
-	// 临时禁用批处理
-	const prevIsBatchingUpdates = getIsBatchingUpdates();
-	setIsBatchingUpdates(false);
-
-	try {
-		// 执行传入的函数
-		return fn();
-	} finally {
-		// 恢复批处理状态
-		setIsBatchingUpdates(prevIsBatchingUpdates);
-
-		// 如果不在批处理中，执行队列中的更新
-		if (!getIsBatchingUpdates()) {
-			flushUpdates();
-		}
-	}
-}
-
-/**
- * 批处理执行函数，将多个状态更新合并为一次渲染
- * @param {Function} fn 需要批处理执行的函数
- * @returns {*} 函数执行的返回值
- */
-export function batchedUpdates(fn) {
-	// 临时启用批处理
-	const prevIsBatchingUpdates = getIsBatchingUpdates();
-	setIsBatchingUpdates(true);
-
-	try {
-		// 执行传入的函数
-		return fn();
-	} finally {
-		// 恢复批处理状态
-		setIsBatchingUpdates(prevIsBatchingUpdates);
-
-		// 如果不在批处理中，执行队列中的更新
-		if (!getIsBatchingUpdates()) {
-			flushUpdates();
-		}
-	}
-}
+export const flushSync = flushSyncImpl;
+export const batchedUpdates = batchedUpdatesImpl;
 
 /**
  *
@@ -424,14 +383,11 @@ function dispatchReducerAction(fiber, queue, reducer, action) {
 
 	// 3. 克隆 fiber，准备重新渲染
 	fiber.alternate = { ...fiber };
+	// 防止 workloop 错误遍历到兄弟节点
 	fiber.sibling = null;
 
-	// 4. 调度重渲染
-	if (getIsBatchingUpdates()) {
-		enqueueUpdate(() => scheduleUpdateOnFiber(fiber));
-	} else {
-		scheduleUpdateOnFiber(fiber);
-	}
+	// 4. 调度重渲染（统一入队，由微任务批处理合并为一次渲染）
+	enqueueUpdate(() => scheduleUpdateOnFiber(fiber));
 }
 
 /**

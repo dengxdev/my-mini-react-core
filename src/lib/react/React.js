@@ -1,7 +1,4 @@
-import {
-	getIsBatchingUpdates,
-	enqueueUpdate,
-} from "../shared/batch";
+import { enqueueUpdate } from "../shared/batch";
 
 function Component(props) {
 	this.props = props;
@@ -20,12 +17,8 @@ Component.prototype.setState = function (partialState) {
 	updateQueue.push({ payload: partialState });
 
 	if (Component._updater && Component._updater.enqueueSetState) {
-		if (getIsBatchingUpdates()) {
-			// 批处理中：推迟 scheduleUpdateOnFiber 的调用
-			enqueueUpdate(() => Component._updater.enqueueSetState(fiber));
-		} else {
-			Component._updater.enqueueSetState(fiber);
-		}
+		// 统一入队，由微任务批处理合并为一次渲染
+		enqueueUpdate(() => Component._updater.enqueueSetState(fiber));
 	}
 };
 
