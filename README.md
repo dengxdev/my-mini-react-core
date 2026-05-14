@@ -116,7 +116,7 @@ pnpm test
 - **Hooks**：useState/useReducer mount & update、函数式更新、hook 错位检测、effect tag 标记
 - **批处理**：同一事件循环合并、flushSync 同步执行
 
-## 我踩过的一些坑（面试时能聊半小时）
+## 我踩过的一些坑
 
 ### 坑 1：`linkFiber` 按值传递导致 sibling 链表断裂
 一开始写 Diff 后的 fiber 链接逻辑时，我在 `linkFiber` 函数内部直接写了 `lastNewFiber = newFiber`，以为这样调用方的变量会被更新。结果页面永远只能渲染出第一个子节点——JS 的对象引用是按值传递的，函数内部的重新赋值对外部变量毫无影响。后来改为 `return newFiber`，让调用方重新接收返回值，sibling 链表才正常建立。这个 bug 让我对"JS 里没有指针"这件事有了肌肉记忆。
@@ -136,7 +136,7 @@ pnpm test
 ### 坑 6：Eager State Bailout —— 状态没变就不该 render
 有一次写 Counter，点击按钮设置同样的数字，发现组件还是会重新走一遍完整渲染链路。排查后发现 `dispatchReducerAction` 没有把"新状态和旧状态相同"的情况过滤掉。后来引入了 `eagerState` 缓存：在 dispatch 阶段就预跑一遍 reducer，如果 `Object.is` 判定相同，直接 return，不走任何调度。这个优化在 React 源码里叫 Eager State Reducer。
 
-### 坑 7：直接修改 current fiber 的 sibling（已重构 ✅）
+### 坑 7：直接修改 current fiber 的 sibling（已重构）
 最初为了限制 work loop 的遍历范围，我在 `dispatchReducerAction` 里直接写了 `fiber.sibling = null`。后来意识到这破坏了 current tree 的只读原则——React 的哲学是 current 不可变，所有修改应该在 WIP 树上进行。
 
 **重构过程**：
@@ -163,10 +163,39 @@ pnpm test
 
 ## 后续计划
 
-- [x] 重构 `fiber.sibling = null`，改为在 WIP 树上控制遍历范围
-- [x] 引入 Lane 模型简化版，实现高优先级更新打断低优先级渲染的代码骨架
-- [x] 补充核心链路测试（Diff、Hooks、Scheduler）
-- [ ] 尝试实现最简版 Suspense
+**高优先级：**
+
+- [ ] **完整 Lane 模型 + 调度器多优先级**
+  - 目前只有 `SyncLane` / `DefaultLane` 两条，源码中是 31 位 lane 位运算 + 5 级调度优先级（`ImmediatePriority` / `UserBlockingPriority` / `NormalPriority` / `LowPriority` / `IdlePriority`）
+  - 参考源码：`ReactFiberLane.js`、`SchedulerPriorities.js`
+
+- [ ] **Suspense 边界机制**
+  - 支持子树 `throw Promise` → 捕获到 Suspense boundary → 切换 fallback UI → Promise resolve 后恢复真实内容
+  - 这是 React 并发特性的门面，面试必问。参考源码：`ReactFiberSuspenseComponent.js`、`ReactFiberThenable.js`
+
+- [ ] **Error Boundary（错误边界）**
+  - 类组件支持 `static getDerivedStateFromError` + `componentDidCatch`
+  - 渲染阶段抛错时，React 会沿 Fiber 树向上找到最近的 Error Boundary 并进入 fallback 渲染路径
+  - 参考源码：`ReactFiberThrow.js` 中的 `throwException` 与 `createRootErrorUpdate`
+
+- [ ] **useTransition / useDeferredValue**
+  - React 18 并发特性的标志性 API：`startTransition` 包裹的更新标记为 `TransitionLane`，允许被更高优先级更新打断
+  - `useDeferredValue` 依赖 Transition 机制实现"延迟值"，能让 UI 保持响应
+  - 参考源码：`ReactFiberTransition.js`、`ReactStartTransition.js`
+
+**中等优先级（性能优化 + 开发体验）：**
+
+- [ ] **React.memo + forwardRef**
+  - `memo` 通过自定义比较函数决定是否需要重新渲染；`forwardRef` 解决函数组件 ref 透传问题
+  - 参考源码：`ReactMemo.js`、`ReactForwardRef.js`
+
+- [ ] **合成事件系统（SyntheticEvent）**
+  - 在根节点统一代理所有事件，实现事件委托、优先级调度、跨浏览器兼容
+  - 参考源码：`react-dom/src/events/` 目录
+
+- [ ] **useContext / createContext**
+  - 跨层级传递数据，需要配合 Fiber 树在 `beginWork` 时读取/传递 context value
+  - 参考源码：`ReactContext.js`、`ReactFiberNewContext.js`
 
 ## 关于我
 
