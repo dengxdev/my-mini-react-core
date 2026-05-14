@@ -1,16 +1,125 @@
-# React + Vite
+# Mini React —— 从 0 实现的 React 核心引擎
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+> 一个大二学生为了搞懂 React 源码到底在干什么，而写的"能跑"的 React。
 
-Currently, two official plugins are available:
+## 为什么做这个项目
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+学 React 两年后，我发现自己虽然能熟练写 Hooks，但对背后的机制一知半解：
+- `setState` 之后到底发生了什么？
+- Fiber 树为什么能"打断"渲染？
+- Diff 算法为什么是 O(n) 而不是 O(n³)？
+- `useEffect` 和 `useLayoutEffect` 的执行时机差在哪？
 
-## React Compiler
+所以我决定删掉 `node_modules/react`，自己写一个能跑起来的版本。过程中对照 React 18 源码，把大概 1800 行核心逻辑拆成了 Scheduler、Reconciler、Renderer 三层。写完之后回头看官方源码，终于能看懂了。
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 实现了什么
 
-## Expanding the ESLint configuration
+这不是一个玩具级的 demo，它包含 React 的核心链路：
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### 1. Fiber 架构
+- 完整的 Fiber 链表结构（child / sibling / return）
+- 双缓冲机制（current ↔ workInProgress），支持更新时复用旧节点
+
+### 2. 调度器 Scheduler
+- 基于 `MessageChannel` 的宏任务调度（和 React 18 一致）
+- 时间片机制（5ms），支持 `shouldYieldToHost()` 让出主线程
+- 任务优先级队列（基于小顶堆）
+
+### 3. Reconciler 协调器
+- **Diff 算法**：单端遍历 + Map 复用，完整实现 React 的两轮 Diff 策略
+- **批量更新**：支持自动批处理（batchUpdates）和 `flushSync` 强制刷新
+- **Eager Bailout**：状态未变时直接跳过调度
+
+### 4. Hooks（全链路实现）
+- `useState` / `useReducer`
+- `useEffect` / `useLayoutEffect`（含清理函数和异步调度）
+- `useMemo` / `useCallback`
+- 支持 Hooks 规则校验（开发时误用会抛错）
+
+### 5. 组件支持
+- 函数组件
+- 类组件（含 `setState` 更新链路）
+- Fragment
+- Host Component（原生 DOM 标签）
+
+## 项目结构
+
+```
+src/lib
+├── react/                    # React 核心 API
+│   ├── React.js              # Component 基类
+│   └── ReactHooks.js         # 全部 Hooks 实现
+├── react-dom/                # DOM 渲染器
+│   └── ReactDom.js
+├── reconciler/               # 协调器（核心中的核心）
+│   ├── ReactFiber.js         # Fiber 节点创建
+│   ├── ReactFiberWorkLoop.js # 工作循环 + 调度入口
+│   ├── ReactFiberBeginWork.js
+│   ├── ReactFiberCompleteWork.js
+│   ├── ReactFiberCommitWork.js
+│   ├── ReactFiberReconciler.js
+│   ├── ReactChildFiber.js    # Diff 算法主逻辑
+│   └── ReactChildFiberAssistant.js
+├── scheduler/                # 调度器
+│   ├── Scheduler.js          # MessageChannel + 时间片
+│   └── SchedulerMinHeap.js   # 任务优先级队列
+└── shared/                   # 工具函数 + 标志位
+    ├── batch.js              # 批量更新
+    └── utils.js
+```
+
+## 本地运行
+
+```bash
+pnpm install
+pnpm dev
+```
+
+`App.jsx` 里可以直接用你自己实现的 React API（项目里我配了 alias，`react` 和 `react-dom` 会指向 `src/lib`）。
+
+## 我踩过的一些坑（面试时能聊半小时）
+
+### 坑 1：`linkFiber` 按值传递导致 sibling 链表断裂
+一开始写 Diff 后的 fiber 链接逻辑时，我在 `linkFiber` 函数内部直接写了 `lastNewFiber = newFiber`，以为这样调用方的变量会被更新。结果页面永远只能渲染出第一个子节点——JS 的对象引用是按值传递的，函数内部的重新赋值对外部变量毫无影响。后来改为 `return newFiber`，让调用方重新接收返回值，sibling 链表才正常建立。这个 bug 让我对"JS 里没有指针"这件事有了肌肉记忆。
+
+### 坑 2：`scheduleUpdateOnFiber` 一路回溯到了容器对象
+最初实现 `scheduleUpdateOnFiber` 时，`while (node.return)` 会一直往上遍历到根节点之外，把 `_isContainer` 容器对象也当成了 fiber，导致后续 `beginWork` 时拿到一个根本不是 fiber 的东西，直接报错。修复方式是在循环条件里加了 `node.return.tag !== undefined`，确保停在真正的 fiber 上。这件事让我意识到 React 的"根"其实有两层：容器（container）和根 fiber（root fiber）。
+
+### 坑 3：useEffect 和 useLayoutEffect 的执行时机
+最早我把 useEffect 的 cleanup 和执行都塞进了 `commitWorker` 的同步递归里，结果 useEffect 的回调在 DOM 更新前就执行了，而且每次 commit 节点都会触发一次，性能稀烂。后来改成在 `commitWorker` 阶段只收集Passive Effect，等整棵树 commit 完成后统一用 `setTimeout` 异步 flush。这才和 React 真正的行为对齐：useLayoutEffect 同步（浏览器绘制前），useEffect 异步（绘制后）。
+
+### 坑 4：渲染阶段触发 setState 导致死循环
+如果没有防护，在 `renderWithHooks` 里调用 `setState` 会立刻修改 `wip`，而 `wip` 正在被遍历，结果就是无限重新调度。我加了 `isRendering` 锁和 `renderPhaseUpdates` 队列：渲染阶段产生的更新先暂存，等当前轮次的 `commitRoot` 结束后再统一触发。这也解释了为什么 React 源码里有一堆 `didScheduleRenderPhaseUpdate` 的判断。
+
+### 坑 5：批量更新不是天然的，要自己实现
+一开始以为"在一个事件里多次 setState 只会触发一次重渲染"是框架自动做的，结果发现如果不加干预，每次 `dispatchReducerAction` 都会独立调用 `scheduleUpdateOnFiber`，一次点击能触发十几次 render。后来自己实现了 `isBatchingUpdates` 标志位 + `enqueueUpdate` / `flushUpdates`，在合成事件入口和 `scheduleCallback` 里配合，才实现了批量更新。
+
+### 坑 6：Eager State Bailout —— 状态没变就不该 render
+有一次写 Counter，点击按钮设置同样的数字，发现组件还是会重新走一遍完整渲染链路。排查后发现 `dispatchReducerAction` 没有把"新状态和旧状态相同"的情况过滤掉。后来引入了 `eagerState` 缓存：在 dispatch 阶段就预跑一遍 reducer，如果 `Object.is` 判定相同，直接 return，不走任何调度。这个优化在 React 源码里叫 Eager State Reducer。
+
+### 坑 7：直接修改 current fiber 的 sibling（正在重构）
+最初为了限制 work loop 的遍历范围，我在 `dispatchReducerAction` 里直接写了 `fiber.sibling = null`。后来意识到这破坏了 current tree 的只读原则——React 的哲学是 current 不可变，所有修改应该在 WIP 树上进行。后续计划重构为在 `scheduleUpdateOnFiber` 里创建 WIP 根节点，把 sibling 的切断放在 WIP 树上。
+
+## 和 React 源码的差异
+
+这个项目是**为了理解原理**而做的，不是 1:1 还原：
+
+| 特性 | 本项目 | React 18 源码 |
+|------|--------|---------------|
+| 调度器 | MessageChannel + 时间片 | 同上，但源码还有优先级通道 |
+| Diff | 两轮遍历 + Map | 基本一致 |
+| 并发模型 | 协作式调度（可让出） | Lane 模型 + 优先级中断 |
+| Hooks | 基础 Hooks | 完整 Hooks + 内部优化 |
+| Suspense | ❌ 未实现 | ✅ |
+| Error Boundary | ❌ 未实现 | ✅ |
+
+## 后续计划
+
+- [ ] 重构 `fiber.sibling = null`，改为在 WIP 树上控制遍历范围
+- [ ] 引入 Lane 模型简化版，实现高优先级更新打断低优先级渲染
+- [ ] 补充核心链路测试（Diff、Hooks、Scheduler）
+- [ ] 尝试实现最简版 Suspense
+
+## 关于我
+
+大二前端，正在准备暑期实习。这个项目是我简历上"理解框架原理"的底气来源。如果你也在手写 React，欢迎交流。
