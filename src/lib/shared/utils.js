@@ -19,7 +19,7 @@ export const NoLane = 0;
 export const SyncLane = 1;      // 001  同步优先级：flushSync、原生事件
 export const DefaultLane = 2;   // 010  默认优先级：普通 setState
 
-// 当前更新使用的 lane，用于在 dispatch 阶段判断优先级
+/** @type {number} 当前更新使用的 lane，用于在 dispatch 阶段判断优先级 */
 export let currentUpdateLane = DefaultLane;
 export function setCurrentUpdateLane(lane) {
 	currentUpdateLane = lane;

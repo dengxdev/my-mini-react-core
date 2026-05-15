@@ -9,9 +9,12 @@ import {
 	batchedUpdates as batchedUpdatesImpl,
 } from "../shared/batch";
 
-let currentlyRenderingFiber = null; // 当前正在渲染的 fiber 对象
-let workInProgressHook = null; // wip 上 hook 链表的当前游标/尾部
-let currentHook = null; // current（旧 fiber）上 hook 链表的当前游标
+/** @type {Object|null} 当前正在渲染的 fiber 对象 */
+let currentlyRenderingFiber = null;
+/** @type {Object|null} wip 上 hook 链表的当前游标/尾部 */
+let workInProgressHook = null;
+/** @type {Object|null} current（旧 fiber）上 hook 链表的当前游标 */
+let currentHook = null;
 
 /**
  * 初始化函数组件的 Hooks 环境，准备开始新的渲染
@@ -386,7 +389,7 @@ function dispatchReducerAction(fiber, queue, reducer, action) {
 
 	// 3. 克隆 fiber，准备重新渲染
 	fiber.alternate = { ...fiber };
-	// 【已重构】不再直接修改 current fiber 的 sibling
+	// 不再直接修改 current fiber 的 sibling
 	// 以前这里写了 fiber.sibling = null，现在改为在 scheduleUpdateOnFiber 中
 	// 通过 createWorkInProgress 创建 WIP 根节点，在 WIP 上切断 sibling
 

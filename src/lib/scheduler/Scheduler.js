@@ -4,16 +4,20 @@
 
 import { push, pop, peek } from "./SchedulerMinHeap";
 import { getCurrentTime } from "../shared/utils";
-// 任务队列
+/** @type {Array<Object>} 任务队列 */
 const taskQueue = [];
-// 任务 id 计数器
+/** @type {number} 任务 id 计数器 */
 let taskIdCounter = 1;
-// 时间片限制：5ms
+/** @type {number} 时间片限制（单位：ms） */
 const frameInterval = 5;
-// 记录任务开始时间
+/** @type {number} 记录任务开始时间 */
 let startTime = -1;
 // 通过 MessageChannel 来模拟浏览器的 requestIdleCallback
-const { port1, port2 } = new MessageChannel();
+const channel = new MessageChannel();
+/** @type {MessagePort} 调度端端口，用于发起调度请求 */
+const port1 = channel.port1;
+/** @type {MessagePort} 执行端端口，用于接收调度消息并执行任务 */
+const port2 = channel.port2;
 
 /**
  * 判断是否应该让出浏览器的渲染主线程

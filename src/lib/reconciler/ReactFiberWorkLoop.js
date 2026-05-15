@@ -6,20 +6,19 @@ import scheduleCallback, { shouldYieldToHost } from "../scheduler/Scheduler";
 import { createWorkInProgress } from "./ReactFiber";
 import { NoLane, DefaultLane, SyncLane } from "../shared/utils";
 
-// wip 的全称为 work in progress，表示正在进行的工作
-// 当前正在进行的工作 fiber 对象
+/** @type {Object|null} 当前正在进行的工作 fiber 对象（wip = work in progress） */
 let wip = null;
 
-// 当前根节点的 fiber 对象
+/** @type {Object|null} 当前根节点的 fiber 对象 */
 let wipRoot = null;
 
-// 标记是否正在渲染中，防止渲染阶段调用 setState 破坏 wip
+/** @type {boolean} 标记是否正在渲染中，防止渲染阶段调用 setState 破坏 wip */
 let isRendering = false;
-// 存储渲染阶段产生的更新，等当前渲染完成后再触发
+/** @type {Array<Object>} 存储渲染阶段产生的更新，等当前渲染完成后再触发 */
 let renderPhaseUpdates = [];
-// Lane 模型：高优先级更新打断低优先级渲染的标志
+/** @type {boolean} Lane 模型：高优先级更新打断低优先级渲染的标志 */
 let shouldInterrupt = false;
-// 当前渲染的 lane
+/** @type {number} 当前渲染的 lane */
 let currentRenderLane = NoLane;
 
 function scheduleUpdateOnFiber(fiber, lane = DefaultLane) {
@@ -61,8 +60,6 @@ function scheduleUpdateOnFiber(fiber, lane = DefaultLane) {
 
 export default scheduleUpdateOnFiber;
 
-// ========== 内部工具函数 ==========
-
 /**
  * 该函数会在每一帧有剩余时间的时候执行
  * 不再接收时间参数，内部通过 shouldYieldToHost() 检查是否应该让出主线程
@@ -75,7 +72,7 @@ function workloop() {
       // 检查是否应该让出主线程（超过 5ms）或被高优先级更新打断
       if (shouldYieldToHost() || shouldInterrupt) {
         shouldInterrupt = false;
-        // 时间用完或被中断，返回函数让调度器知道还有工作要做
+        // 时间用完或被中断，返回函数让 schedule 调度器知道还有工作要做
         return workloop;
       }
       performUnitOfWork(); // 该方法负责处理一个 fiber 节点

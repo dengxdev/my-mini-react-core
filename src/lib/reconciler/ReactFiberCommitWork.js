@@ -13,7 +13,7 @@ import {
   Fragment,
 } from "./ReactWorkTags";
 
-// 收集所有待执行的 passive effect 对应的 fiber 节点
+/** @type {Array<Object>} 收集所有待执行的 passive effect 对应的 fiber 节点 */
 let pendingPassiveEffects = [];
 
 /**
