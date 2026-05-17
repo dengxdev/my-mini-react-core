@@ -13,6 +13,7 @@ export const Deletion = 0b0000000000000000001000; // 8
 // 副作用相关 flags
 export const Passive = 0b0000000000000000010000; // 16   useEffect
 export const Layout = 0b0000000000000000100000; // 32   useLayoutEffect
+export const HasEffect = 0b0000000000000001000000; // 64
 
 // Lane 模型（简化版）
 export const NoLane = 0;

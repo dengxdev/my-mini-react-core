@@ -4,6 +4,7 @@ import {
   updateNode,
   Passive,
   Layout,
+  HasEffect,
 } from "../shared/utils";
 import {
   FunctionComponent,
@@ -61,7 +62,16 @@ function commitWorker(wip) {
 
   // 收集 Passive 副作用，等 commitRoot 完成后统一异步执行
   if (wip.updateQueue && wip.updateQueue.lastEffect) {
-    const hasPassiveEffects = wip.updateQueue.lastEffect.tag === Passive;
+    const lastEffect = wip.updateQueue.lastEffect;
+    let effect = lastEffect.next;
+    let hasPassiveEffects = false;
+    do {
+      if ((effect.tag & (Passive | HasEffect)) === (Passive | HasEffect)) {
+        hasPassiveEffects = true;
+        break;
+      }
+      effect = effect.next;
+    } while (effect !== lastEffect.next);
     if (hasPassiveEffects) {
       pendingPassiveEffects.push(wip);
     }
@@ -148,8 +158,8 @@ function commitHookEffectListUnmount(tag, finishedWork) {
     let effect = firstEffect;
     do {
       if ((effect.tag & tag) === tag) {
-        const destroy = effect.destroy;
-        effect.destroy = undefined;
+        const destroy = effect.inst.destroy;
+        effect.inst.destroy = undefined;
         if (destroy !== undefined) {
           destroy();
         }
@@ -173,7 +183,7 @@ function commitHookEffectListMount(tag, finishedWork) {
     do {
       if ((effect.tag & tag) === tag) {
         const create = effect.create;
-        effect.destroy = create();
+        effect.inst.destroy = create();
       }
       effect = effect.next;
     } while (effect !== firstEffect);
@@ -190,6 +200,23 @@ function commitDeletion(fiber) {
     commitDeletion(child);
     child = child.sibling;
   }
+
+  // 新增：函数组件卸载时执行 hooks cleanup
+  if (fiber.tag === FunctionComponent) {
+    if (fiber.updateQueue && fiber.updateQueue.lastEffect) {
+      const lastEffect = fiber.updateQueue.lastEffect;
+      let effect = lastEffect.next;
+      do {
+        const destroy = effect.inst.destroy;
+        effect.inst.destroy = undefined;
+        if (destroy !== undefined) {
+          destroy();
+        }
+        effect = effect.next;
+      } while (effect !== lastEffect.next);
+    }
+  }
+
   if (fiber.tag === ClassComponent) {
     const instance = fiber.stateNode;
     if (instance && instance.componentWillUnmount) {
@@ -214,7 +241,8 @@ function commitLifeCycles(finishedWork) {
   switch (finishedWork.tag) {
     case FunctionComponent: {
       if (finishedWork.updateQueue && finishedWork.updateQueue.lastEffect) {
-        commitHookEffectListMount(Layout, finishedWork);
+        commitHookEffectListUnmount(Layout | HasEffect, finishedWork);
+        commitHookEffectListMount(Layout | HasEffect, finishedWork);
       }
       break;
     }
@@ -252,8 +280,8 @@ function commitLifeCycles(finishedWork) {
  * @param {Object} finishedWork 完成的 fiber 节点
  */
 function commitPassiveHookEffects(finishedWork) {
-  commitHookEffectListUnmount(Passive, finishedWork);
-  commitHookEffectListMount(Passive, finishedWork);
+  commitHookEffectListUnmount(Passive | HasEffect, finishedWork);
+  commitHookEffectListMount(Passive | HasEffect, finishedWork);
 }
 
 /**

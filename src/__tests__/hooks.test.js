@@ -89,7 +89,7 @@ describe('hooks', () => {
     }
     Component();
 
-    expect(fiber.updateQueue.lastEffect.tag).toBe(32); // Layout = 0b100000 = 32
+    expect(fiber.updateQueue.lastEffect.tag).toBe(32 | 64); // Layout | HasEffect = 96
   });
 
   it('useEffect 应该标记为 Passive tag', () => {
@@ -102,6 +102,6 @@ describe('hooks', () => {
     }
     Component();
 
-    expect(fiber.updateQueue.lastEffect.tag).toBe(16); // Passive = 0b10000 = 16
+    expect(fiber.updateQueue.lastEffect.tag).toBe(16 | 64); // Passive | HasEffect = 80
   });
 });

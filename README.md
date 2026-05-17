@@ -78,22 +78,53 @@ src/lib
 
 ```mermaid
 flowchart TD
-    A[用户触发 setState] --> B[dispatchReducerAction]
-    B --> C[创建 Update 推入 pending 环形链表]
-    C --> D[scheduleUpdateOnFiber]
-    D --> E[向上找到根 Fiber]
-    E --> F[createWorkInProgress 创建 WIP 根]
-    F --> G{判断 lane}
-    G -->|SyncLane| H[直接同步执行 workloop]
-    G -->|DefaultLane| I[Scheduler MessageChannel 调度 workloop]
-    H --> J[workloop --> performUnitOfWork]
-    I --> J
-    J --> K[beginWork --> renderWithHooks]
-    K --> L[reconcileChildren Diff 算法]
-    L --> M[completeWork]
-    M --> J
-    M --> N[commitRoot --> commitWorker]
-    N --> O[commitLifeCycles + flushPassiveEffects]
+    subgraph 触发阶段
+        A[用户触发 setState 或初次渲染] --> B[dispatchReducerAction]
+        B --> C[创建 Update 推入 hook.queue.pending 环形链表]
+        C --> D{lane === SyncLane?}
+        D -- 是 --> E[scheduleUpdateOnFiber 立即执行]
+        D -- 否 --> F[enqueueUpdate 暂存，等微任务统一 flush]
+    end
+
+    subgraph 调度阶段 Scheduler
+        E --> G[进入 workLoop]
+        F --> H[Scheduler 通过 MessageChannel 调度宏任务]
+        H --> G
+        G --> I{shouldYieldToHost? 时间片耗尽?}
+        I -- 是 --> H
+        I -- 否 --> J[performUnitOfWork 执行一个 Fiber 单元]
+    end
+
+    subgraph Render 阶段 可打断
+        J --> K{判断 wip.tag}
+        K -- FunctionComponent --> L[beginWork: renderWithHooks 执行组件函数]
+        K -- HostComponent --> M[beginWork: 创建/复用真实 DOM 节点]
+        K -- ClassComponent --> N[beginWork: 实例化或更新类组件]
+        L --> O[reconcileChildren: Diff 算法生成子 Fiber 链表]
+        M --> O
+        N --> O
+        O --> P[completeWork: 收集 flags 和 updateQueue 向上冒泡]
+        P --> Q{wip.sibling 存在?}
+        Q -- 是 --> R[移动到 sibling 继续遍历]
+        Q -- 否 --> S[回到 return，完成父节点]
+        R --> J
+        S --> J
+        S --> T[Render 阶段结束，生成 effectList]
+    end
+
+    subgraph Commit 阶段 不可打断
+        T --> U[commitRoot]
+        U --> V[Mutation 子阶段: commitWorker 递归]
+        V --> W[DOM 插入 Placement / 属性更新 Update / 节点删除 Deletion]
+        W --> X[Layout 子阶段: commitLifeCycles]
+        X --> Y[useLayoutEffect: 先执行旧 cleanup，再执行新 create]
+        X --> Z[类组件: componentDidMount / componentDidUpdate]
+        Y --> AA[收集 pendingPassiveEffects 到数组]
+        Z --> AA
+        AA --> AB[setTimeout 异步触发 flushPassiveEffects]
+        AB --> AC[Passive 子阶段]
+        AC --> AD[useEffect: 先执行旧 cleanup，再执行新 create]
+    end
 ```
 
 ## 本地运行
@@ -113,7 +144,7 @@ pnpm test
 
 覆盖范围：
 - **Diff 算法**：复用、删除、移动、初次渲染 Placement
-- **Hooks**：useState/useReducer mount & update、函数式更新、hook 错位检测、effect tag 标记
+- **Hooks**：useState/useReducer mount & update、函数式更新、hook 错位检测、effect tag 标记与 cleanup 清理
 - **批处理**：同一事件循环合并、flushSync 同步执行
 
 ## 我踩过的一些坑
@@ -125,18 +156,32 @@ pnpm test
 最初实现 `scheduleUpdateOnFiber` 时，`while (node.return)` 会一直往上遍历到根节点之外，把 `_isContainer` 容器对象也当成了 fiber，导致后续 `beginWork` 时拿到一个根本不是 fiber 的东西，直接报错。修复方式是在循环条件里加了 `node.return.tag !== undefined`，确保停在真正的 fiber 上。这件事让我意识到 React 的"根"其实有两层：容器（container）和根 fiber（root fiber）。
 
 ### 坑 3：useEffect 和 useLayoutEffect 的执行时机
-最早我把 useEffect 的 cleanup 和执行都塞进了 `commitWorker` 的同步递归里，结果 useEffect 的回调在 DOM 更新前就执行了，而且每次 commit 节点都会触发一次，性能稀烂。后来改成在 `commitWorker` 阶段只收集 Passive Effect，等整棵树 commit 完成后统一用 `setTimeout` 异步 flush。这才和 React 真正的行为对齐：useLayoutEffect 同步（浏览器绘制前），useEffect 异步（绘制后）。
+最早我把 useEffect 的回调塞进了 `commitWorker` 的同步递归里，结果 useEffect 在 DOM 更新前就执行了，而且每次 commit 节点都会触发一次，性能稀烂。后来改成在 `commitWorker` 阶段只收集 Passive Effect，等整棵树 commit 完成后统一用 `setTimeout` 异步 flush，这才对齐了 React 的行为：useLayoutEffect 同步（浏览器绘制前），useEffect 异步（绘制后）。
 
-### 坑 4：渲染阶段触发 setState 导致死循环
+### 坑 4：effect cleanup 不是简单的 "destroy = create()"
+一开始我以为 effect 的 cleanup 就是 `effect.destroy = create()` 这么简单，结果踩了大坑。第一个问题是：update 时如果 deps 没变，我直接 `return` 不 push effect，导致 updateQueue 为空，commit 阶段根本遍历不到这个 hook，旧 cleanup 被静默跳过。第二个问题更隐蔽：即使 deps 变了，新 push 的 effect 的 `destroy` 初始值是 `undefined`，而旧的 destroy 跟着旧 effect 对象一起被 GC 了，永远没机会执行。
+
+还有组件卸载：`commitDeletion` 里我只处理了类组件的 `componentWillUnmount`，函数组件的 hooks cleanup 完全没管。
+
+后来翻 React 源码（`ReactFiberHooks.js` 和 `ReactFiberCommitEffects.js`），发现真正的设计是：
+- **EffectInstance**：用一个独立对象 `{ destroy: undefined }` 存 cleanup，跨 render 复用同一个引用
+- **HasEffect 标志位**：mount 和 deps 变化时打 `Passive | HasEffect`，deps 未变时只打 `Passive`，commit 阶段通过位运算 `(tag & flags) === flags` 判断是否执行
+- **无论 deps 变不变都 push effect**：保证 updateQueue 的环形链表结构始终完整
+- **严格的时序**：commit 阶段必须先 `commitHookEffectListUnmount` 再 `commitHookEffectListMount`，unmount 时读 `inst.destroy`，mount 时写 `inst.destroy = create()`
+- **卸载时递归 cleanup**：`commitDeletion` 遍历被删除的子树，对每个函数组件的 updateQueue 执行所有 destroy
+
+改完之后终于能正确回答"为什么 useEffect 的 cleanup 在 re-render 前执行、在 unmount 时也会执行"这个问题了。
+
+### 坑 5：渲染阶段触发 setState 导致死循环
 如果没有防护，在 `renderWithHooks` 里调用 `setState` 会立刻修改 `wip`，而 `wip` 正在被遍历，结果就是无限重新调度。我加了 `isRendering` 锁和 `renderPhaseUpdates` 队列：渲染阶段产生的更新先暂存，等当前轮次的 `commitRoot` 结束后再统一触发。这也解释了为什么 React 源码里有一堆 `didScheduleRenderPhaseUpdate` 的判断。
 
-### 坑 5：批量更新不是天然的，要自己实现
+### 坑 6：批量更新不是天然的，要自己实现
 一开始以为"在一个事件里多次 setState 只会触发一次重渲染"是框架自动做的，结果发现如果不加干预，每次 `dispatchReducerAction` 都会独立调用 `scheduleUpdateOnFiber`，一次点击能触发十几次 render。后来自己实现了 `isBatchingUpdates` 标志位 + `enqueueUpdate` / `flushUpdates`，在合成事件入口和 `scheduleCallback` 里配合，才实现了批量更新。
 
-### 坑 6：Eager State Bailout —— 状态没变就不该 render
+### 坑 7：Eager State Bailout —— 状态没变就不该 render
 有一次写 Counter，点击按钮设置同样的数字，发现组件还是会重新走一遍完整渲染链路。排查后发现 `dispatchReducerAction` 没有把"新状态和旧状态相同"的情况过滤掉。后来引入了 `eagerState` 缓存：在 dispatch 阶段就预跑一遍 reducer，如果 `Object.is` 判定相同，直接 return，不走任何调度。这个优化在 React 源码里叫 Eager State Reducer。
 
-### 坑 7：直接修改 current fiber 的 sibling（已重构）
+### 坑 8：直接修改 current fiber 的 sibling
 最初为了限制 work loop 的遍历范围，我在 `dispatchReducerAction` 里直接写了 `fiber.sibling = null`。后来意识到这破坏了 current tree 的只读原则——React 的哲学是 current 不可变，所有修改应该在 WIP 树上进行。
 
 **重构过程**：
@@ -145,7 +190,7 @@ pnpm test
 3. 把 `wip.sibling = null` 的切断逻辑从 `dispatchReducerAction` 迁移到 `scheduleUpdateOnFiber` 中，现在动的是 WIP 树，不是 current 树
 4. 即使渲染被中断或出错，current tree 的结构依然保持完整
 
-> 面试话术："我最初在 dispatch 阶段为了简化，直接写了 `fiber.sibling = null` 来限制 work loop 的遍历范围。但后来 review 代码时发现这违反了 React 的只读原则——current tree 不应该在渲染期间被修改。所以我重构了 `scheduleUpdateOnFiber`，在设置 `wip` 时通过 `createWorkInProgress` 创建一个新的 WIP 根节点，把 sibling 的切断放在 WIP 树上。这样即使渲染被中断或出错，current tree 的结构依然是完整的。"
+> 关键设计反思：我最初在 dispatch 阶段为了简化，直接写了 `fiber.sibling = null` 来限制 work loop 的遍历范围。但后来 review 代码时发现这违反了 React 的只读原则——current tree 不应该在渲染期间被修改。所以我重构了 `scheduleUpdateOnFiber`，在设置 `wip` 时通过 `createWorkInProgress` 创建一个新的 WIP 根节点，把 sibling 的切断放在 WIP 树上。这样即使渲染被中断或出错，current tree 的结构依然是完整的。
 
 ## 和 React 源码的差异
 
@@ -199,4 +244,4 @@ pnpm test
 
 ## 关于我
 
-大二前端，正在准备暑期实习。这个项目是我简历上"理解框架原理"的底气来源。如果你也在手写 React，欢迎交流。
+大二前端，喜欢折腾底层原理。这个项目是我深入理解 React 源码的笔记，如果你也在手写 React，欢迎交流。

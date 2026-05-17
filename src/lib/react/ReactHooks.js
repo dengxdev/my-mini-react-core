@@ -2,7 +2,7 @@
  * 该模块用于实现各种 Hooks
  */
 import scheduleUpdateOnFiber from "../reconciler/ReactFiberWorkLoop";
-import { Passive, Layout, currentUpdateLane, DefaultLane, SyncLane } from "../shared/utils";
+import { Passive, Layout, HasEffect, currentUpdateLane, DefaultLane, SyncLane } from "../shared/utils";
 import {
 	enqueueUpdate,
 	flushSync as flushSyncImpl,
@@ -131,6 +131,8 @@ export function useEffect(create, deps) {
 	const hook = updateWorkInProgressHook();
 	const nextDeps = deps === undefined ? null : deps;
 
+	let inst;
+
 	if (currentlyRenderingFiber.alternate) {
 		const prevEffect = hook.memoizedState;
 
@@ -150,20 +152,27 @@ export function useEffect(create, deps) {
 		}
 
 		if (isValidEffect) {
+			inst = prevEffect.inst;
 			const prevDeps = prevEffect.deps;
 			if (nextDeps !== null) {
 				const depsEqual = nextDeps.every((dep, i) =>
 					Object.is(dep, prevDeps[i]),
 				);
 				if (depsEqual) {
-					// 依赖未变，不用推入新的副作用
+					// 依赖未变，push 不带 HasEffect 的 effect，保持 updateQueue 结构完整
+					hook.memoizedState = pushEffect(Passive, create, inst, nextDeps);
 					return;
 				}
 			}
+		} else {
+			inst = { destroy: undefined };
 		}
+	} else {
+		inst = { destroy: undefined };
 	}
 
-	const effect = pushEffect(Passive, create, undefined, nextDeps);
+	// mount 或 deps 变化：push 带 HasEffect 的 effect
+	const effect = pushEffect(Passive | HasEffect, create, inst, nextDeps);
 	hook.memoizedState = effect;
 }
 
@@ -175,6 +184,8 @@ export function useEffect(create, deps) {
 export function useLayoutEffect(create, deps) {
 	const hook = updateWorkInProgressHook();
 	const nextDeps = deps === undefined ? null : deps;
+
+	let inst;
 
 	if (currentlyRenderingFiber.alternate) {
 		const prevEffect = hook.memoizedState;
@@ -194,13 +205,20 @@ export function useLayoutEffect(create, deps) {
 		}
 
 		if (isValidEffect) {
+			inst = prevEffect.inst;
 			if (areHookInputsEqual(nextDeps, prevEffect.deps)) {
+				// 依赖未变，push 不带 HasEffect 的 effect
+				hook.memoizedState = pushEffect(Layout, create, inst, nextDeps);
 				return;
 			}
+		} else {
+			inst = { destroy: undefined };
 		}
+	} else {
+		inst = { destroy: undefined };
 	}
 
-	const effect = pushEffect(Layout, create, undefined, nextDeps);
+	const effect = pushEffect(Layout | HasEffect, create, inst, nextDeps);
 	hook.memoizedState = effect;
 }
 
@@ -419,11 +437,11 @@ function dispatchReducerAction(fiber, queue, reducer, action) {
  * @param {Array|null} deps 依赖数组
  * @returns {Object} 副作用对象
  */
-function pushEffect(tag, create, destroy, deps) {
+function pushEffect(tag, create, inst, deps) {
 	const effect = {
 		tag,
 		create,
-		destroy,
+		inst,
 		deps,
 		next: null,
 	};
