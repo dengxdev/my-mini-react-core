@@ -7,6 +7,8 @@ import {
 	enqueueUpdate,
 	flushSync as flushSyncImpl,
 	batchedUpdates as batchedUpdatesImpl,
+	isInsideFlushSync,
+	enqueueSyncUpdate,
 } from "../shared/batch";
 
 /** @type {Object|null} 当前正在渲染的 fiber 对象 */
@@ -396,7 +398,13 @@ function dispatchReducerAction(fiber, queue, reducer, action) {
 	// 4. 调度重渲染
 	// Lane 模型：SyncLane 直接同步执行，不走微任务批处理
 	if (lane === SyncLane) {
-		scheduleUpdateOnFiber(fiber, SyncLane);
+		if (isInsideFlushSync) {
+			// 在 flushSync 内部：只收集 fiber，延迟到 flushSync 结束时统一触发
+			enqueueSyncUpdate(fiber);
+		} else {
+			// 普通 SyncLane 场景（如原生事件回调）：直接同步触发
+			scheduleUpdateOnFiber(fiber, SyncLane);
+		}
 	} else {
 		// 统一入队，由微任务批处理合并为一次渲染
 		enqueueUpdate(() => scheduleUpdateOnFiber(fiber, lane));

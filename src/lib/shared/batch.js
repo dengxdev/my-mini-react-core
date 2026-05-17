@@ -10,12 +10,19 @@
  */
 
 import { setCurrentUpdateLane, SyncLane, DefaultLane } from "./utils";
+import scheduleUpdateOnFiber from "../reconciler/ReactFiberWorkLoop";
 
 /** @type {Array<() => void>} 待执行的更新回调队列 */
 let callbacks = [];
 
 /** @type {boolean} 是否已调度 flush，避免重复调度 */
 let isFlushScheduled = false;
+
+/** @type {boolean} 标记是否在 flushSync 回调执行期间 */
+export let isInsideFlushSync = false;
+
+/** @type {Array<Object>} 收集 flushSync 内需要更新的 fiber */
+let pendingSyncFibers = [];
 
 /**
  * 调度一次微任务以 flush 所有被收集的更新。
@@ -55,24 +62,67 @@ export function flushUpdates() {
 }
 
 /**
+ * 在 flushSync 内部注册一个需要同步更新的 fiber
+ * @param {Object} fiber - 需要更新的 fiber 节点
+ */
+export function enqueueSyncUpdate(fiber) {
+	pendingSyncFibers.push(fiber);
+}
+
+/**
+ * 遍历 pendingSyncFibers，按根节点去重后统一触发 scheduleUpdateOnFiber
+ */
+function flushSyncUpdates() {
+	if (pendingSyncFibers.length === 0) return;
+
+	const fibers = pendingSyncFibers;
+	pendingSyncFibers = [];
+
+	// 按根节点去重: 多个子组件可能属于同一个根
+	const rootSet = new Set();
+	fibers.forEach((fiber) => {
+		let node = fiber;
+		while (node.return && !node.return._isContainer) {
+			node = node.return;
+		}
+		rootSet.add(node);
+	});
+
+	// 每个唯一根只触发一次同步渲染
+	rootSet.forEach((root) => {
+		scheduleUpdateOnFiber(root, SyncLane);
+	});
+}
+
+/**
  * 同步执行函数，并立即处理所有 pending 的状态更新。
  *
- * 在 flushSync 期间，状态更新会走 SyncLane，直接同步执行 workLoop，
- * 不会进入微任务批处理队列。常用于需要立即读取 DOM 等同步场景。
+ * 在 flushSync 期间，状态更新会走 SyncLane。回调内部的多次 setState
+ * 会被收集并合并为一次同步渲染，而不是各自触发独立的渲染。
  *
  * @template T
  * @param {() => T} fn - 需要同步执行的函数
  * @returns {T} 函数执行的返回值
  */
 export function flushSync(fn) {
-	// Lane 模型：进入同步上下文
+	// 1. 进入同步批处理上下文
+	const prevIsInsideFlushSync = isInsideFlushSync;
+	isInsideFlushSync = true;
+	pendingSyncFibers = []; // 清空收集器
+
+	// 2. 切换 lane，清空已有的微任务队列
 	setCurrentUpdateLane(SyncLane);
 	flushUpdates();
 	try {
 		return fn();
 	} finally {
-		flushUpdates();
-		// 恢复默认 lane
+		// 3. 退出同步批处理上下文
+		isInsideFlushSync = prevIsInsideFlushSync;
+
+		// 4. 统一触发：找到所有唯一根节点，每个根只渲染一次
+		flushSyncUpdates();
+
+		// 5. 恢复默认 lane
 		setCurrentUpdateLane(DefaultLane);
 	}
 }
