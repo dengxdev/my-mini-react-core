@@ -164,8 +164,6 @@ export function useEffect(create, deps) {
 					return;
 				}
 			}
-		} else {
-			inst = { destroy: undefined };
 		}
 	} else {
 		inst = { destroy: undefined };
@@ -211,8 +209,6 @@ export function useLayoutEffect(create, deps) {
 				hook.memoizedState = pushEffect(Layout, create, inst, nextDeps);
 				return;
 			}
-		} else {
-			inst = { destroy: undefined };
 		}
 	} else {
 		inst = { destroy: undefined };
