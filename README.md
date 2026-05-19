@@ -114,7 +114,9 @@ flowchart TD
 
     subgraph Commit 阶段 不可打断
         T --> U[commitRoot]
-        U --> V[Mutation 子阶段: commitWorker 递归]
+        U --> U1[双缓冲切换: container._reactRootContainer = wipRoot]
+        U --> U2[更新类组件实例 _reactInternalFiber 指向新 current]
+        U1 --> V[Mutation 子阶段: commitWorker 递归]
         V --> W[DOM 插入 Placement / 属性更新 Update / 节点删除 Deletion]
         W --> X[Layout 子阶段: commitLifeCycles]
         X --> Y[useLayoutEffect: 先执行旧 cleanup，再执行新 create]
@@ -192,6 +194,68 @@ pnpm test
 
 > 关键设计反思：我最初在 dispatch 阶段为了简化，直接写了 `fiber.sibling = null` 来限制 work loop 的遍历范围。但后来 review 代码时发现这违反了 React 的只读原则——current tree 不应该在渲染期间被修改。所以我重构了 `scheduleUpdateOnFiber`，在设置 `wip` 时通过 `createWorkInProgress` 创建一个新的 WIP 根节点，把 sibling 的切断放在 WIP 树上。这样即使渲染被中断或出错，current tree 的结构依然是完整的。
 
+### 坑 9：双缓冲不是"有了 alternate 就够了"——current/WIP 切换的三个隐藏 bug
+
+这是我在本项目里踩得最深的一个坑，也是让我真正理解 React 双缓冲精髓的一次。
+
+**第一层误解：我以为 `createWorkInProgress` 只克隆根节点就够了**
+
+一开始我疑惑：为什么 `scheduleUpdateOnFiber` 里只调用 `createWorkInProgress(node)` 转换根节点？子节点不也在此时转换吗？commit 时岂不是只基于这一个节点？后来仔细看 work loop 才明白——子 fiber 是在 `performUnitOfWork → beginWork → reconcileChildren` 的过程中**逐步创建**的，根节点只是入口。这个设计是对的，React 源码同样如此。
+
+**第二层误解：我以为必须像 React 源码一样做 `root.current = finishedWork`**
+
+当我进一步分析时，发现 `instance._reactInternalFiber` 永远指向第 1 轮渲染的 WIP 根，而 `createWorkInProgress` 每次都复用它的 `alternate`（原始根）。我推断：从第 3 轮开始，diff 看到的旧树永远是第 1 轮的，而且类组件 `setState` 的 `updateQueue` 会丢失。于是我想在 `commitRoot` 里加上 `container._reactRootContainer = wipRoot` 来手动切换 current。
+
+但写完这个计划后发现测试挂了。回滚后重新分析原始代码，我才意识到：
+- `instance._reactInternalFiber` 始终指向同一棵 WIP 树，`createWorkInProgress` 会复用它的 `alternate`
+- `alternate` 之间互相链接，确实形成了一个能跑的简化版双缓冲
+- 第 2 轮更新时，diff 看到的 `oldFiber = returnFiber.alternate?.child` 其实能追溯到上轮子树
+
+所以**回滚后代码其实是能跑的**，但我之前的 plan 是多此一举，甚至破坏了原有的平衡。
+
+**第三层真相：简化版双缓冲确实有三个隐藏 bug**
+
+虽然大框架能跑，但当我写端到端测试去验证类组件 `setState` 时，发现 DOM 根本不更新。debug 后定位到三个问题：
+
+**Bug 1：`createWorkInProgress` 没有同步 `stateNode`**
+
+我的 `createWorkInProgress` 在复用 `alternate` 时，只重置了 `flags/child/sibling`，却漏了 `stateNode`。导致第 2 轮的 WIP 根 `stateNode = null`，`updateClassComponent` 误判为 mount 分支，直接 `new` 了一个新实例，跳过了 `processUpdateQueue`。
+
+查 React 源码 `ReactFiber.js:343` 才知道：`createWorkInProgress` 里明确有一行 `workInProgress.stateNode = current.stateNode`。我漏了这行。
+
+**Bug 2：`createWorkInProgress` 把 `updateQueue` 直接清空为 `null`**
+
+我原本写了 `wip.updateQueue = null`，意图是"重置副作用字段"。但类组件的 `setState` 正是把待处理的更新推到了 fiber 的 `updateQueue` 上。`processUpdateQueue` 读取时发现是 `null`，自然什么更新都不处理。
+
+React 源码的做法更精细：它不清空 `updateQueue`，而是在 `processUpdateQueue` 消费完之后才置空。我的简化版直接做了一次性转移：`wip.updateQueue = current.updateQueue; current.updateQueue = null`，确保 updateQueue 跟着 current → WIP 一起流转。
+
+**Bug 3：`instance._reactInternalFiber` 永远指向第 1 轮 WIP**
+
+`updateClassComponent` 只在 mount 时设置 `instance._reactInternalFiber = wip`，后续 update 分支 never 更新它。这导致 `setState` 永远把 `updateQueue` 写到同一棵旧树上。虽然靠 `alternate` 链勉强能工作，但严格来说 current 的身份已经漂移了。
+
+修复方式是在 `commitRoot` 后遍历 WIP 树，把所有类组件实例的 `_reactInternalFiber` 更新为新的 current 节点。同时把 `container._reactRootContainer` 指向新的 current 根，让 `scheduleUpdateOnFiber` 始终能拿到正确的起点。
+
+**最终的正确时序**：
+
+```
+第1轮 mount:
+  container._reactRootContainer = A (原始根)
+  WIP = B (createWorkInProgress(A), B.stateNode = A.stateNode)
+  commit 后: container._reactRootContainer = B, instance._reactInternalFiber = B
+
+第2轮 update:
+  setState 写到 B.updateQueue
+  scheduleUpdateOnFiber 取 currentRoot = B
+  createWorkInProgress(B) 复用 A，同步 A.stateNode = B.stateNode
+  A.updateQueue = B.updateQueue (转移), B.updateQueue = null
+  processUpdateQueue(A, 实例) 正确执行
+  commit 后: container._reactRootContainer = A, instance._reactInternalFiber = A
+```
+
+现在 current 和 WIP 严格交替，diff 依据始终是最新的旧树，类组件 `setState` 也能正确更新 state 和 DOM。
+
+> 这次踩坑让我明白：React 的双缓冲不是"两个对象互相 alternate"这么简单，它背后有一整套状态流转的约定——`stateNode` 要同步、`updateQueue` 要流转、current 的身份要切换。只看源码的某一行很容易漏掉这些隐含契约。
+
 ## 和 React 源码的差异
 
 这个项目是**为了理解原理**而做的，不是 1:1 还原：
@@ -202,7 +266,7 @@ pnpm test
 | Diff | 两轮遍历 + Map | 基本一致 |
 | 并发模型 | **Lane 模型简化版（SyncLane + DefaultLane + 可打断骨架）** | 完整 Lane 模型 + 31 条优先级位运算 |
 | Hooks | 基础 Hooks | 完整 Hooks + 内部优化 |
-| WIP 树 | 已引入 `createWorkInProgress`，current 只读 | 完整双缓冲 + 复用池 |
+| WIP 树 / 双缓冲 | 已引入 `createWorkInProgress`；commit 后手动切换 `container._reactRootContainer` 并同步 `stateNode` 与 `updateQueue` | 完整双缓冲 + FiberRoot.current 指针 + 复用池；`createWorkInProgress` 同步 `stateNode` 但不转移 `updateQueue`（由 `processUpdateQueue` 消费后清理） |
 | Suspense | ❌ 未实现 | ✅ |
 | Error Boundary | ❌ 未实现 | ✅ |
 

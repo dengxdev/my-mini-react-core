@@ -5,6 +5,7 @@ import commitWorker, { flushPendingPassiveEffects } from "./ReactFiberCommitWork
 import scheduleCallback, { shouldYieldToHost } from "../scheduler/Scheduler";
 import { createWorkInProgress } from "./ReactFiber";
 import { NoLane, DefaultLane, SyncLane } from "../shared/utils";
+import { ClassComponent } from "./ReactWorkTags";
 
 /** @type {Object|null} 当前正在进行的工作 fiber 对象（wip = work in progress） */
 let wip = null;
@@ -38,9 +39,14 @@ function scheduleUpdateOnFiber(fiber, lane = DefaultLane) {
     node = node.return;
   }
 
+  // 通过伪 fiber 找到容器 DOM，再取最新的 current root
+  const container = node.return ? node.return.stateNode : null;
+  const currentRoot =
+    container && container._reactRootContainer ? container._reactRootContainer : node;
+
   // 不直接用 current 节点作为 wip，而是创建一个新的 WIP 根
   // 这样即使渲染被中断或出错，current tree 的结构依然是完整的
-  const wipNode = createWorkInProgress(node);
+  const wipNode = createWorkInProgress(currentRoot);
   wipNode.sibling = null; // 现在动的是 WIP，不是 current
   wipNode.lane = lane;    // 记录本次更新的 lane，供 workloop 使用
   wip = wipNode;
@@ -138,6 +144,24 @@ function commitRoot() {
   commitWorker(wipRoot);
   // 统一异步调度 passive effects（useEffect）
   flushPendingPassiveEffects();
+
+  // 双缓冲切换：WIP 树成为新的 current 树
+  const containerNode = wipRoot && wipRoot.return;
+  if (containerNode && containerNode.stateNode) {
+    containerNode.stateNode._reactRootContainer = wipRoot;
+  }
+
+  // 更新所有类组件实例的 _reactInternalFiber 指向新的 current 树
+  const stack = [wipRoot];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (node.tag === ClassComponent && node.stateNode) {
+      node.stateNode._reactInternalFiber = node;
+    }
+    if (node.sibling) stack.push(node.sibling);
+    if (node.child) stack.push(node.child);
+  }
+
   // 渲染完成后将 wipRoot 置为 null
   wipRoot = null;
 }

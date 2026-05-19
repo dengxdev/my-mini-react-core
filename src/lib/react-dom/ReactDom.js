@@ -56,6 +56,9 @@ function updateContainer(element, container) {
   // 到目前为止，就创建了第一个 fiber 对象
   // 但是目前仅仅只有最外层的父元素创建了对应的 fiber 对象
 
+  // 将根 fiber 挂载到 container，供 scheduleUpdateOnFiber 取到最新的 current
+  container._reactRootContainer = fiber;
+
   // 至此，ReactDom 层的职责结束，控制权交由 reconciler 层
   scheduleUpdateOnFiber(fiber);
 }

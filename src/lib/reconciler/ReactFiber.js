@@ -41,7 +41,10 @@ export function createWorkInProgress(current) {
 		wip.child = null;
 		wip.sibling = null;
 		wip.deletions = null;
-		wip.updateQueue = null;
+			wip.stateNode = current.stateNode;
+		// 将 updateQueue 从 current 转移到 WIP，避免重复处理或丢失
+		wip.updateQueue = current.updateQueue;
+		current.updateQueue = null;
 		wip.memoizedState = current.memoizedState;
 		wip.memoizedProps = current.memoizedProps;
 	}
