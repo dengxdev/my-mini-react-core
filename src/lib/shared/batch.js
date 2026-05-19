@@ -82,7 +82,7 @@ function flushSyncUpdates() {
 	const rootSet = new Set();
 	fibers.forEach((fiber) => {
 		let node = fiber;
-		while (node.return && !node.return._isContainer) {
+		while (node.return) {
 			node = node.return;
 		}
 		rootSet.add(node);

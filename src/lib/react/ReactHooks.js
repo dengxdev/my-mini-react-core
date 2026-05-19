@@ -2,7 +2,14 @@
  * 该模块用于实现各种 Hooks
  */
 import scheduleUpdateOnFiber from "../reconciler/ReactFiberWorkLoop";
-import { Passive, Layout, HasEffect, currentUpdateLane, DefaultLane, SyncLane } from "../shared/utils";
+import {
+	Passive,
+	Layout,
+	HasEffect,
+	currentUpdateLane,
+	DefaultLane,
+	SyncLane,
+} from "../shared/utils";
 import {
 	enqueueUpdate,
 	flushSync as flushSyncImpl,
@@ -153,16 +160,10 @@ export function useEffect(create, deps) {
 
 		if (isValidEffect) {
 			inst = prevEffect.inst;
-			const prevDeps = prevEffect.deps;
-			if (nextDeps !== null) {
-				const depsEqual = nextDeps.every((dep, i) =>
-					Object.is(dep, prevDeps[i]),
-				);
-				if (depsEqual) {
-					// 依赖未变，push 不带 HasEffect 的 effect，保持 updateQueue 结构完整
-					hook.memoizedState = pushEffect(Passive, create, inst, nextDeps);
-					return;
-				}
+			if (areHookInputsEqual(nextDeps, prevEffect.deps)) {
+				// 依赖未变，push 不带 HasEffect 的 effect，保持 updateQueue 结构完整
+				hook.memoizedState = pushEffect(Passive, create, inst, nextDeps);
+				return;
 			}
 		}
 	} else {
@@ -230,9 +231,8 @@ export function useCallback(callback, deps) {
 
 	if (currentlyRenderingFiber.alternate) {
 		const prevState = hook.memoizedState;
-		if (prevState && nextDeps) {
-			const depsEqual = areHookInputsEqual(nextDeps, prevState.deps);
-			if (depsEqual) {
+		if (prevState) {
+			if (areHookInputsEqual(nextDeps, prevState.deps)) {
 				return prevState.value;
 			}
 		}
@@ -258,9 +258,8 @@ export function useMemo(create, deps) {
 
 	if (currentlyRenderingFiber.alternate) {
 		const prevState = hook.memoizedState;
-		if (prevState && nextDeps) {
-			const depsEqual = areHookInputsEqual(nextDeps, prevState.deps);
-			if (depsEqual) {
+		if (prevState) {
+			if (areHookInputsEqual(nextDeps, prevState.deps)) {
 				return prevState.value;
 			}
 		}
@@ -282,18 +281,13 @@ export function useMemo(create, deps) {
  * @returns {boolean} 是否相等
  */
 function areHookInputsEqual(nextDeps, prevDeps) {
-	if (prevDeps === null) {
+	if (prevDeps === null || nextDeps === null) {
 		return false;
 	}
 	if (prevDeps.length !== nextDeps.length) {
 		return false;
 	}
-	for (let i = 0; i < prevDeps.length; i++) {
-		if (!Object.is(nextDeps[i], prevDeps[i])) {
-			return false;
-		}
-	}
-	return true;
+	return nextDeps.every((dep, i) => Object.is(dep, prevDeps[i]));
 }
 
 /**
@@ -406,17 +400,17 @@ function dispatchReducerAction(fiber, queue, reducer, action) {
 	// 3. 克隆 fiber，准备重新渲染
 	fiber.alternate = { ...fiber };
 	// 不再直接修改 current fiber 的 sibling
-	// 以前这里写了 fiber.sibling = null，现在改为在 scheduleUpdateOnFiber 中
-	// 通过 createWorkInProgress 创建 WIP 根节点，在 WIP 上切断 sibling
+	// 以前这里写了 fiber.sibling = null, 现在改为在 scheduleUpdateOnFiber 中
+	// 通过 createWorkInProgress 创建 WIP 根节点, 在 WIP 上切断 sibling
 
 	// 4. 调度重渲染
-	// Lane 模型：SyncLane 直接同步执行，不走微任务批处理
+	// Lane 模型: SyncLane 直接同步执行，不走微任务批处理
 	if (lane === SyncLane) {
 		if (isInsideFlushSync) {
-			// 在 flushSync 内部：只收集 fiber，延迟到 flushSync 结束时统一触发
+			// 在 flushSync 内部：只收集 fiber, 延迟到 flushSync 结束时统一触发
 			enqueueSyncUpdate(fiber);
 		} else {
-			// 普通 SyncLane 场景（如原生事件回调）：直接同步触发
+			// 普通 SyncLane 场景（如原生事件回调）: 直接同步触发
 			scheduleUpdateOnFiber(fiber, SyncLane);
 		}
 	} else {
