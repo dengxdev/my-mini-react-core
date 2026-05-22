@@ -2,9 +2,8 @@ import { reconcileChildren } from "./ReactChildFiber";
 import { renderWithHooks } from "../react/ReactHooks";
 
 /**
- *
+ * 更新原生组件 原生组件需要
  * @param {*} wip 需要处理的 fiber 对象节点
- * 注意这个 fiber 节点已经能够确定的是一个 HostComponent
  */
 export function updateHostComponent(wip) {
   wip.memoizedProps = wip.props;
@@ -21,7 +20,7 @@ export function updateFunctionComponent(wip) {
   const { type, props } = wip;
   // 记录到 fiber 上，供下次 update 使用
   wip.memoizedProps = props;
-  // 执行函数组件，返回 React Element（单个 vnode）
+  // 执行函数组件，返回 React Element(vnode 树), Hooks 就在这里执行
   const children = type(props);
   // 传入 reconcileChildren，内部会统一处理为数组
   reconcileChildren(wip, children);
@@ -36,12 +35,12 @@ export function updateClassComponent(wip) {
   let instance = wip.stateNode;
 
   if (!instance) {
-    // mount 阶段：new 实例，关联 fiber
+    // mount 阶段: new 实例，关联 fiber
     instance = new type(props);
     wip.stateNode = instance;
     instance._reactInternalFiber = wip;
   } else {
-    // update 阶段：复用实例，更新 props，处理 setState 队列
+    // update 阶段: 复用实例，更新 props，处理 setState 队列
     instance.props = props;
     processUpdateQueue(wip, instance);
   }

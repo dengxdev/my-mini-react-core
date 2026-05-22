@@ -80,8 +80,6 @@ function commitWorker(wip) {
 
 export default commitWorker;
 
-// ========== 内部工具函数 ==========
-
 /**
  * 获取 fiber 节点的父 DOM 元素
  * @param {Object} wip 工作中的 fiber 节点
@@ -289,7 +287,6 @@ function commitPassiveHookEffects(finishedWork) {
  */
 function flushPassiveEffects() {
   if (pendingPassiveEffects.length === 0) return;
-
   const effects = pendingPassiveEffects;
   pendingPassiveEffects = [];
 

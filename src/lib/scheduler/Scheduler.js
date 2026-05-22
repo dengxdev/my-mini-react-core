@@ -24,8 +24,8 @@ const port2 = channel.port2;
  * @returns {boolean} 如果超过 5ms 返回 true
  */
 export function shouldYieldToHost() {
-  const timeElapsed = getCurrentTime() - startTime;
-  return timeElapsed >= frameInterval;
+	const timeElapsed = getCurrentTime() - startTime;
+	return timeElapsed >= frameInterval;
 }
 
 /**
@@ -33,65 +33,59 @@ export function shouldYieldToHost() {
  * @param {*} callback 是一个需要执行的任务，该任务会在每一帧有剩余时间的时候去执行
  */
 export default function scheduleCallback(callback) {
-  // 获取当前时间
-  const currentTime = getCurrentTime();
-  // 计算出过期时间（设置为较长时间，确保任务会被执行）
-  const expirationTime = currentTime + 5000;
+	// 获取当前时间
+	const currentTime = getCurrentTime();
+	// 计算出过期时间（设置为较长时间，确保任务会被执行）
+	const expirationTime = currentTime + 5000;
 
-  // 组装一个新的任务对象
-  const newTask = {
-    id: taskIdCounter++,
-    callback,
-    expirationTime,
-    sortIndex: expirationTime,
-  };
+	// 组装一个新的任务对象
+	const newTask = {
+		id: taskIdCounter++,
+		callback,
+		expirationTime,
+		sortIndex: expirationTime,
+	};
 
-  // 将新的任务推入到任务队列
-  push(taskQueue, newTask);
-
-  // 请求调度，产生一个宏任务
-  port1.postMessage(null);
+	// 将新的任务推入到任务队列
+	push(taskQueue, newTask);
+	// 请求调度，产生一个宏任务
+	port1.postMessage(null);
 }
 
-// 每次 port1.postMessage(null) 的时候，就会触发 port2.onmessage
-// 在 port2.onmessage 中，我们会去执行任务队列中的任务
 port2.onmessage = function () {
-  // 初始化开始时间
-  if (startTime === -1) {
-    startTime = getCurrentTime();
-  }
+	// 初始化开始时间
+	if (startTime === -1) {
+		startTime = getCurrentTime();
+	}
 
-  // 从任务队列中取出第一个任务
-  let currentTask = peek(taskQueue);
+	// 从任务队列中取出第一个任务
+	let currentTask = peek(taskQueue);
 
-  while (currentTask) {
-    // 检查是否应该让出主线程（超过 5ms）
-    if (shouldYieldToHost()) {
-      // 时间用完，让出主线程，下一帧继续
-      port1.postMessage(null);
-      return;
-    }
+	while (currentTask) {
+		// 检查是否应该让出主线程（超过 5ms）
+		if (shouldYieldToHost()) {
+			// 时间用完，让出主线程，下一帧继续
+			port1.postMessage(null);
+			return;
+		}
 
-    // 没有进入到上面的 if，说明当前的任务是需要执行的
-    const callback = currentTask.callback;
-    currentTask.callback = null;
+		const callback = currentTask.callback;
+		currentTask.callback = null;
 
-    // 执行对应的任务，不传时间参数
-    const taskResult = callback();
-
-    if (taskResult === undefined) {
-      // 进入此 if，说明是任务执行完了才退出来的，那么就可以将其从任务队列中删除了
-      pop(taskQueue);
-      currentTask = peek(taskQueue);
-    } else {
-      // 任务未完成，保存回调，下一帧继续
-      currentTask.callback = taskResult;
-      port1.postMessage(null);
-      return;
-    }
-  }
-  
-  // 所有任务完成，重置开始时间
-  startTime = -1;
+		// 执行任务 (workloop , 而 workloop 中又会基于 fiber 架构做可中断的:
+		// 调用 performUnitOfWork 来执行具体的任务单元)
+		const taskResult = callback();
+		if (taskResult === undefined) {
+			// 进入此 if，说明是任务执行完了才退出来的，那么就可以将其从任务队列中删除了
+			pop(taskQueue);
+			currentTask = peek(taskQueue);
+		} else {
+			// 任务未完成，保存回调，下一帧继续
+			currentTask.callback = taskResult;
+			port1.postMessage(null);
+			return;
+		}
+	}
+	// 所有任务完成，重置开始时间
+	startTime = -1;
 };
-

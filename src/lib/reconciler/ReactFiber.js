@@ -41,7 +41,7 @@ export function createWorkInProgress(current) {
 		wip.child = null;
 		wip.sibling = null;
 		wip.deletions = null;
-			wip.stateNode = current.stateNode;
+		wip.stateNode = current.stateNode;
 		// 将 updateQueue 从 current 转移到 WIP，避免重复处理或丢失
 		wip.updateQueue = current.updateQueue;
 		current.updateQueue = null;
@@ -51,72 +51,52 @@ export function createWorkInProgress(current) {
 	return wip;
 }
 /**
- *
+ * 基于 vnode 创建 fiber 对象
  * @param {*} vnode 当前的 vnode 节点
  * @param {*} returnFiber 父 Fiber 节点
  */
 function createFiber(vnode, returnFiber) {
 	const fiber = {
-		// 原始 vnode.type
-		type: vnode.type,
-		// key
-		key: vnode.key,
-		// props
-		props: vnode.props,
-		// 关联的本地状态节点：DOM节点、类实例或null
-		stateNode: null,
-		// 整个 fiber 树是以链表的形式串联起来的，因此需要 child、sibling 之类的
-		// 子 fiber
-		child: null,
-		// 兄弟 fiber
-		sibling: null,
-		// 父 fiber
-		return: returnFiber,
-		// 该 fiber 对象要做的具体操作
-		flags: NoFlags,
-		// 记录当前节点在当前层级下的位置
-		index: null,
-		// 存储旧的 fiber 对象
-		alternate: null,
-		// 上一次 commit 后的 props
-		memoizedProps: null,
-		// 上一次 commit 后的 state（类组件存 state，函数组件存 hooks 链表头）
-		memoizedState: null,
+		type: vnode.type,	// 原始 vnode.type
+		key: vnode.key,	// key
+		props: vnode.props,	// props
+		stateNode: null,	// 关联的本地状态节点：DOM节点、类实例或null
+		child: null,	// 子 fiber
+		sibling: null,	// 兄弟 fiber
+		return: returnFiber,	// 父 fiber
+		flags: NoFlags,	// 该 fiber 对象要做的具体操作
+		index: null,	// 记录当前节点在当前层级下的位置
+		alternate: null,	// 存储旧的 fiber 对象
+		memoizedProps: null,	// 上一次 commit 后的 props
+		memoizedState: null,	// 上一次 commit 后的 state（类组件存 state, 
+								// 函数组件存 hooks 链表头）
 	};
-
-	// 实际上 fiber 对象上面还有一个 tag 值
-	// 这个 tag 值是什么取决于 fiber 的 type 值
-	// 不同的 vnode 类型，type 是有所不同的
-
-	const type = vnode.type; // 先存储一下 type 值，之后不用每次都去获取
+	// tag 值取决于 fiber 的 type 值
+	// 不同的 vnode 类型, type 不同
+	// 例如: type 可能是一个字符串（原生标签），也可能是一个函数（函数组件或类组件），
+	// 还可能是 undefined（文本节点）
+	const type = vnode.type;
 	if (isStrOrNum(type)) {
 		// 原生标签
 		fiber.tag = HostComponent;
 	} else if (isFn(type)) {
-		// 注意这里会有两种情况：函数组件和类组件的 type 都是 function
-		// 例如函数组件的 type 值为 f xxx()
-		// 类组件 class XXX，背后仍然是一个函数
-		// 所以我们通过判断 type 是否有 isReactComponent 属性来判断是否为类组件
+		// 由于函数组件和类组件的 type 都是 function 
+		// 根据 isReactComponent 标记来判断是否为类组件
 		if (type.prototype.isReactComponent) {
-			// 类组件
 			fiber.tag = ClassComponent;
 		} else {
-			// 函数组件
 			fiber.tag = FunctionComponent;
 		}
 	} else if (isUndefined(type)) {
 		// 说明这是一个文本节点
 		fiber.tag = HostText;
-		// 除此之外还需要多做一件事情
-		// 文本节点是没有 props 属性的，我们将手动的给该 fiber 设置一个 props 属性
+		// 文本节点没有 props 属性，该 fiber 手动设置一个 props 属性
 		fiber.props = {
 			children: vnode,
 		};
 	} else {
-		// 说明这是一个 Fragment
 		fiber.tag = Fragment;
 	}
-
 	return fiber;
 }
 

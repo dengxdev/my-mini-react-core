@@ -23,7 +23,7 @@ Component.prototype.setState = function (partialState) {
 };
 
 const React = {
-  Component,
+	Component,
 };
 
 export default React;

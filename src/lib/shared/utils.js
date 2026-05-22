@@ -17,8 +17,8 @@ export const HasEffect = 0b0000000000000001000000; // 64
 
 // Lane 模型（简化版）
 export const NoLane = 0;
-export const SyncLane = 1;      // 001  同步优先级：flushSync、原生事件
-export const DefaultLane = 2;   // 010  默认优先级：普通 setState
+export const SyncLane = 1; // 001  同步优先级：flushSync、原生事件
+export const DefaultLane = 2; // 010  默认优先级：普通 setState
 
 /** @type {number} 当前更新使用的 lane，用于在 dispatch 阶段判断优先级 */
 export let currentUpdateLane = DefaultLane;
@@ -70,7 +70,7 @@ export function isArray(arr) {
  * @param {*} nextVal 新值
  */
 export const updateNode = (node, prevVal, nextVal) => {
-	// 两个步骤: 
+	// 两个步骤:
 	// 1. 对旧值的处理
 	// 2. 对新值的处理
 

@@ -6,7 +6,7 @@ import {
 	deleteRemainingChildren,
 	mapRemainingChildren,
 	deleteChild,
-  linkFiber,
+	linkFiber,
 } from "./ReactChildFiberAssistant";
 
 /**
@@ -23,7 +23,7 @@ export function reconcileChildren(returnFiber, children) {
 	let oldFiber = returnFiber.alternate?.child; // 当前位置对应的旧 fiber（更新时才有）
 	let i = 0; // normalizedChildren 数组索引
 	let lastPlacedIndex = 0; // 上次次插入的最远位置，用于判断节点是否需要移动
-	// 是否是初次渲染: true=更新，false=初次渲染
+	// 是否是初次渲染: true = 更新，false = 初次渲染
 	let isUpdate = !!returnFiber.alternate;
 	// 暂存 oldFiber ，以便 sameNode 判断不可复用，跳出第一次遍历
 	// 暂存下一个旧 fiber
@@ -53,8 +53,8 @@ export function reconcileChildren(returnFiber, children) {
 		// 说明新旧节点位置不匹配，需要 break 进入 Map diff。
 		// 但 oldFiber 不能丢失，会在退出第一轮遍历之前被收集。所以用 nextOldFiber 暂存
 		if (oldFiber.index > i) {
-			nextOldFiber = oldFiber;  // 保留，用于 break 后恢复
-			oldFiber = null;  // 临时置空，强制 sameNode 失败
+			nextOldFiber = oldFiber; // 保留，用于 break 后恢复
+			oldFiber = null; // 临时置空，强制 sameNode 失败
 		} else {
 			nextOldFiber = oldFiber.sibling;
 		}
@@ -104,7 +104,7 @@ export function reconcileChildren(returnFiber, children) {
 			const newFiber = createFiber(newChildVnode, returnFiber);
 			// 更新 lastPlacedIndex 以及标记 Placement 的 flags
 			lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, i, isUpdate);
-      // 链接到 fiber 链表
+			// 链接到 fiber 链表
 			lastNewFiber = linkFiber(returnFiber, lastNewFiber, newFiber);
 		}
 	}
@@ -116,16 +116,14 @@ export function reconcileChildren(returnFiber, children) {
 		// 当前的 vnode
 		const newChild = normalizedChildren[i];
 		if (newChild === null) continue;
-
 		// 根据新 vnode 生成新 fiber
 		const newFiber = createFiber(newChild, returnFiber);
-
 		// 哈希表中寻找可复用的 fiber
 		// 对于没有 key 的 newFiber ，生成特殊 key
 		const key = newFiber.key || `${newFiber.type}-${i}`;
 		const matchedFiber = existingChildren.get(key);
 		if (matchedFiber) {
-			// 有可复用的 fiber 
+			// 有可复用的 fiber
 			Object.assign(newFiber, {
 				stateNode: matchedFiber.stateNode,
 				alternate: matchedFiber,
@@ -134,14 +132,11 @@ export function reconcileChildren(returnFiber, children) {
 			// 删除哈希表中的旧 fiber
 			existingChildren.delete(key);
 		}
-
 		// 更新 lastPlacedIndex
 		lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, i, isUpdate);
-
 		// 链接到 fiber 链表
-    lastNewFiber = linkFiber(returnFiber, lastNewFiber, newFiber);
+		lastNewFiber = linkFiber(returnFiber, lastNewFiber, newFiber);
 	}
-
 	// 5. 对于 Map 中剩余的旧节点，标记为删除，在 commit 阶段统一处理。
 	if (isUpdate) {
 		existingChildren.forEach((child) => {

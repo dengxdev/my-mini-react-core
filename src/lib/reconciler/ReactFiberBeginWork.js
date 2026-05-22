@@ -13,6 +13,7 @@ import {
 
 /**
  * 根据 fiber 不同的 tag 值，调用不同的方法来处理
+ * HostText 在后续的 complete 阶段会被特殊处理，不在 beginWork 中处理
  * @param {*} wip
  */
 function beginWork(wip) {

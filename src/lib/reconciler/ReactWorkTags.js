@@ -25,4 +25,3 @@ export const ScopeComponent = 21;
 export const OffscreenComponent = 22;
 export const LegacyHiddenComponent = 23;
 export const CacheComponent = 24;
-
