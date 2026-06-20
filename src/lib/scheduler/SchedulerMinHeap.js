@@ -118,9 +118,10 @@ function siftDown(heap, node, i) {
 				heap[leftIndex] = node;
 				index = leftIndex;
 			}
-		} else if (compare(right, node) < 0 && rightIndex < len) {
+		} else if (rightIndex < len && compare(right, node) < 0) {
 			// 如果进入此分支，说明右节点的过期时间更紧急
-			// 但是这里还需要判断一下，右节点的索引不能越界
+			// 必须先判断右节点索引不越界（rightIndex < len），再访问 right 进行比较，
+			// 否则当某节点只有左子节点、没有右子节点时，right 为 undefined 会导致比较出错
 			heap[index] = right;
 			heap[rightIndex] = node;
 			index = rightIndex;
