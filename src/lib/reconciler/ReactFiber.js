@@ -17,6 +17,12 @@ export function createWorkInProgress(current) {
 	let wip = current.alternate;
 	if (wip === null) {
 		// 首次创建 WIP：基于 current 克隆一个骨架
+		// 若 current 从未渲染过（初始 fiber，memoizedProps 与 memoizedState 均为 null），
+		// 则 alternate 置 null，确保首次渲染走 Hooks 的 mount 分支
+		// （Hooks 依赖 alternate 是否存在来判断 mount/update，初始 fiber 无 hook 链表，
+		//   若误判为 update 会因 current.memoizedState 为 null 而崩溃）
+		const isInitialMount =
+			current.memoizedProps === null && current.memoizedState === null;
 		wip = {
 			type: current.type,
 			key: current.key,
@@ -27,7 +33,7 @@ export function createWorkInProgress(current) {
 			return: current.return,
 			flags: NoFlags,
 			index: current.index,
-			alternate: current,
+			alternate: isInitialMount ? null : current,
 			memoizedProps: current.memoizedProps,
 			memoizedState: current.memoizedState,
 			updateQueue: current.updateQueue,

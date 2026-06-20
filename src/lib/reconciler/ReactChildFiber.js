@@ -15,6 +15,9 @@ import {
  * @param {*} children 新子节点的 vnode 数组
  */
 export function reconcileChildren(returnFiber, children) {
+	// 空子节点（undefined / null / 布尔值）不创建子 fiber
+	// 例如 <hr /> 这类无 children 的标签，props.children 为 undefined
+	if (children === null || children === undefined || typeof children === 'boolean') return;
 	// 不为文本节点创建子 fiber
 	if (isStrOrNum(children)) return;
 	// 规范化为 vnode 数组

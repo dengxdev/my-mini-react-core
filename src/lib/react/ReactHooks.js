@@ -397,8 +397,9 @@ function dispatchReducerAction(fiber, queue, reducer, action) {
 	}
 	queue.pending = update;
 
-	// 3. 克隆 fiber，准备重新渲染
-	fiber.alternate = { ...fiber };
+	// 3. alternate 关系交由 createWorkInProgress 统一管理
+	// 不再在此处用浅拷贝手动设置 fiber.alternate，否则会断裂 alternate 双向链，
+	// 导致 update 阶段 current（wip.alternate）指向未渲染过的初始 fiber 而崩溃
 	// 不再直接修改 current fiber 的 sibling
 	// 以前这里写了 fiber.sibling = null, 现在改为在 scheduleUpdateOnFiber 中
 	// 通过 createWorkInProgress 创建 WIP 根节点, 在 WIP 上切断 sibling
